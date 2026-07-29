@@ -325,6 +325,13 @@ void OpDispatchBuilder::SBBOp(OpcodeArgs, uint32_t SrcIndex) {
     Before = _AtomicFetchSub(Size, SrcPlusCF, DestMem);
   } else {
     Before = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true});
+
+    // Subword SBB requires expanded flag handling, which obscures self-SBB
+    // before instruction selection. Preserve identical inputs only for this
+    // fallback path so the zero idiom can still reach the Arm64 emitter.
+    if (Size < OpSize::i32Bit && Op->Dest.IsGPR() && Op->Src[SrcIndex].IsGPR() && Op->Dest.Data.GPR == Op->Src[SrcIndex].Data.GPR) {
+      Src = Before;
+    }
   }
 
   Result = CalculateFlags_SBB(Size, Before, Src);

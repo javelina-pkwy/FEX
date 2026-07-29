@@ -307,7 +307,16 @@ Ref OpDispatchBuilder::CalculateFlags_SBB(IR::OpSize SrcSize, Ref Src1, Ref Src2
   CalculateAF(Src1, Src2);
 
   Ref Res;
-  if (SrcSize >= OpSize::i32Bit) {
+  if (SrcSize < OpSize::i32Bit && Src1 == Src2) {
+    // Subword SBB normally expands before instruction selection. Keep a
+    // narrow fallback for identical inputs so the backend can select the
+    // zero-register form without regressing to the full flag sequence.
+    auto Zero = Constant(0);
+    RectifyCarryInvert(true);
+    HandleNZCV_RMW();
+    Res = _SbbWithFlags(OpSize, Zero, Zero);
+    CFInverted = true;
+  } else if (SrcSize >= OpSize::i32Bit) {
     // Arm's subtraction has inverted CF from x86, so rectify the input and
     // invert the output.
     RectifyCarryInvert(true);

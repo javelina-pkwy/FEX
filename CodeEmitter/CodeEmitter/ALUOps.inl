@@ -157,6 +157,11 @@ public:
   // Add/subtract immediate
   void add(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, uint32_t Imm, bool LSL12 = false) {
     constexpr uint32_t Op = 0b0001'0001'0 << 23;
+    // Map ADD rd, rn, #0 to the canonical MOV rd, rn form.
+    if (Imm == 0 && rd != ARMEmitter::Reg::rsp && rn != ARMEmitter::Reg::rsp) {
+      mov(s, rd, rn);
+      return;
+    }
     DataProcessing_AddSub_Imm(Op, s, rd, rn, Imm, LSL12);
   }
 
@@ -169,6 +174,11 @@ public:
   }
   void sub(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, uint32_t Imm, bool LSL12 = false) {
     constexpr uint32_t Op = 0b0101'0001'0 << 23;
+    // Map SUB rd, rn, #0 to the canonical MOV rd, rn form.
+    if (Imm == 0 && rd != ARMEmitter::Reg::rsp && rn != ARMEmitter::Reg::rsp) {
+      mov(s, rd, rn);
+      return;
+    }
     DataProcessing_AddSub_Imm(Op, s, rd, rn, Imm, LSL12);
   }
 
@@ -582,6 +592,11 @@ public:
   }
   void eor(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, ARMEmitter::Register rm,
            ARMEmitter::ShiftType Shift = ARMEmitter::ShiftType::LSL, uint32_t amt = 0) {
+    if (rn == rm && amt == 0) {
+      rn = ARMEmitter::Reg::zr;
+      rm = ARMEmitter::Reg::zr;
+    }
+
     constexpr uint32_t Op = 0b100'1010'000U << 21;
     DataProcessing_Shifted_Reg(Op, s, rd, rn, rm, Shift, amt);
   }
@@ -669,6 +684,11 @@ public:
   void sub(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, ARMEmitter::Register rm,
            ARMEmitter::ShiftType Shift = ARMEmitter::ShiftType::LSL, uint32_t amt = 0) {
     LOGMAN_THROW_A_FMT(Shift != ARMEmitter::ShiftType::ROR, "Doesn't support ROR");
+    if (rn == rm && amt == 0) {
+      rn = ARMEmitter::Reg::zr;
+      rm = ARMEmitter::Reg::zr;
+    }
+
     constexpr uint32_t Op = 0b100'1011'000U << 21;
     DataProcessing_Shifted_Reg(Op, s, rd, rn, rm, Shift, amt);
   }
@@ -684,6 +704,11 @@ public:
   void subs(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, ARMEmitter::Register rm,
             ARMEmitter::ShiftType Shift = ARMEmitter::ShiftType::LSL, uint32_t amt = 0) {
     LOGMAN_THROW_A_FMT(Shift != ARMEmitter::ShiftType::ROR, "Doesn't support ROR");
+    if (rn == rm && amt == 0) {
+      rn = ARMEmitter::Reg::zr;
+      rm = ARMEmitter::Reg::zr;
+    }
+
     constexpr uint32_t Op = 0b110'1011'000U << 21;
     DataProcessing_Shifted_Reg(Op, s, rd, rn, rm, Shift, amt);
   }
@@ -732,10 +757,20 @@ public:
     DataProcessing_Extended_Reg(Op, s, rd, rn, rm, ARMEmitter::ExtendedType::UXTB, 0);
   }
   void sbc(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, ARMEmitter::Register rm) {
+    if (rn == rm) {
+      rn = ARMEmitter::Reg::zr;
+      rm = ARMEmitter::Reg::zr;
+    }
+
     constexpr uint32_t Op = 0b0101'1010'000U << 21;
     DataProcessing_Extended_Reg(Op, s, rd, rn, rm, ARMEmitter::ExtendedType::UXTB, 0);
   }
   void sbcs(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, ARMEmitter::Register rm) {
+    if (rn == rm) {
+      rn = ARMEmitter::Reg::zr;
+      rm = ARMEmitter::Reg::zr;
+    }
+
     constexpr uint32_t Op = 0b0111'1010'000U << 21;
     DataProcessing_Extended_Reg(Op, s, rd, rn, rm, ARMEmitter::ExtendedType::UXTB, 0);
   }

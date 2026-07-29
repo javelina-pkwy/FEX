@@ -235,15 +235,15 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: ALU: PC relative") {
   }
 }
 TEST_CASE_METHOD(TestDisassembler, "Emitter: ALU: Add/subtract immediate") {
-  TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 0, false), "add w29, w28, #0x0 (0)");
+  TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 0, false), "mov w29, w28");
   TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 4095, false), "add w29, w28, #0xfff (4095)");
-  TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 0, true), "add w29, w28, #0x0 (0)");
+  TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 0, true), "mov w29, w28");
   TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 4095, true), "add w29, w28, #0xfff000 (16773120)");
   TEST_SINGLE(add(Size::i32Bit, Reg::r29, Reg::r28, 16773120), "add w29, w28, #0xfff000 (16773120)");
 
-  TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 0, false), "add x29, x28, #0x0 (0)");
+  TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 0, false), "mov x29, x28");
   TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 4095, false), "add x29, x28, #0xfff (4095)");
-  TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 0, true), "add x29, x28, #0x0 (0)");
+  TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 0, true), "mov x29, x28");
   TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 4095, true), "add x29, x28, #0xfff000 (16773120)");
   TEST_SINGLE(add(Size::i64Bit, Reg::r29, Reg::r28, 16773120), "add x29, x28, #0xfff000 (16773120)");
 
@@ -277,15 +277,15 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: ALU: Add/subtract immediate") {
   TEST_SINGLE(cmn(Size::i64Bit, Reg::r28, 4095, true), "cmn x28, #0xfff000 (16773120)");
   TEST_SINGLE(cmn(Size::i64Bit, Reg::r28, 16773120), "cmn x28, #0xfff000 (16773120)");
 
-  TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 0, false), "sub w29, w28, #0x0 (0)");
+  TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 0, false), "mov w29, w28");
   TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 4095, false), "sub w29, w28, #0xfff (4095)");
-  TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 0, true), "sub w29, w28, #0x0 (0)");
+  TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 0, true), "mov w29, w28");
   TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 4095, true), "sub w29, w28, #0xfff000 (16773120)");
   TEST_SINGLE(sub(Size::i32Bit, Reg::r29, Reg::r28, 16773120), "sub w29, w28, #0xfff000 (16773120)");
 
-  TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 0, false), "sub x29, x28, #0x0 (0)");
+  TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 0, false), "mov x29, x28");
   TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 4095, false), "sub x29, x28, #0xfff (4095)");
-  TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 0, true), "sub x29, x28, #0x0 (0)");
+  TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 0, true), "mov x29, x28");
   TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 4095, true), "sub x29, x28, #0xfff000 (16773120)");
   TEST_SINGLE(sub(Size::i64Bit, Reg::r29, Reg::r28, 16773120), "sub x29, x28, #0xfff000 (16773120)");
 

@@ -809,6 +809,66 @@
         "mov x6, x26"
       ]
     },
+    "sbb bl, bl": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x18",
+        "Self-SBB zero idiom: subword avoids the expanded flag sequence"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "ngcs w26, wzr",
+        "bfxil x6, x26, #0, #8"
+      ]
+    },
+    "sbb bh, bh": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x18",
+        "Self-SBB zero idiom: high-byte source and destination"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "ngcs w26, wzr",
+        "bfi x6, x26, #8, #8"
+      ]
+    },
+    "sbb bx, bx": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x19",
+        "Self-SBB zero idiom: subword avoids the expanded flag sequence"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "ngcs w26, wzr",
+        "bfxil x6, x26, #0, #16"
+      ]
+    },
+    "sbb ebx, ebx": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x19",
+        "Self-SBB zero idiom: selects the zero-register form"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "ngcs w26, wzr",
+        "mov x6, x26"
+      ]
+    },
+    "sbb rbx, rbx": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x19",
+        "Self-SBB zero idiom: selects the zero-register form"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "ngcs x26, xzr",
+        "mov x6, x26"
+      ]
+    },
     "db 0x1A, 0xcb": {
       "ExpectedInstructionCount": 18,
       "Comment": [
@@ -1255,6 +1315,32 @@
         "mov x6, x26"
       ]
     },
+    "sub bl, bl": {
+      "ExpectedInstructionCount": 5,
+      "Comment": [
+        "0x28",
+        "Self-SUB zero idiom: does not read the original value"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "lsl w0, w6, #24",
+        "cmp w0, w6, lsl #24",
+        "neg w26, wzr",
+        "bfxil x6, x26, #0, #8"
+      ]
+    },
+    "sub rbx, rbx": {
+      "ExpectedInstructionCount": 3,
+      "Comment": [
+        "0x29",
+        "Self-SUB zero idiom: does not read the original value"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "negs x26, xzr",
+        "mov x6, x26"
+      ]
+    },
     "db 0x2A, 0xcb": {
       "ExpectedInstructionCount": 5,
       "Comment": [
@@ -1601,6 +1687,17 @@
       "ExpectedArm64ASM": [
         "eor x27, x6, x7",
         "subs x26, x6, x7"
+      ]
+    },
+    "cmp rbx, rbx": {
+      "ExpectedInstructionCount": 2,
+      "Comment": [
+        "0x39",
+        "Self-CMP zero idiom: does not read the original value"
+      ],
+      "ExpectedArm64ASM": [
+        "mov w27, #0x0",
+        "negs x26, xzr"
       ]
     },
     "db 0x3A, 0xcb": {
