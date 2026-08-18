@@ -81,6 +81,12 @@ void Dispatcher::EmitDispatcher() {
   // This is passed in to parameter 0 (x0)
   mov(STATE, ARMEmitter::XReg::x0);
 
+#ifndef ARCHITECTURE_arm64ec
+  // Pin the L1 lookup-cache base pointer for the lifetime of this JIT execution. It never changes
+  // (the L1 table is fixed-size), so unlike other pinned state this doesn't need refilling elsewhere.
+  ldr(REG_L1_POINTER, STATE_PTR(CpuStateFrame, State.L1Pointer));
+#endif
+
   // Save this stack pointer so we can cleanly shutdown the emulation with a long jump
   // regardless of where we were in the stack
   add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::r0, ARMEmitter::Reg::rsp, 0);
@@ -221,6 +227,14 @@ void Dispatcher::EmitDispatcher() {
       // If we've made it here then we have a real compiled block
       {
         // update L1 cache
+#ifndef ARCHITECTURE_arm64ec
+        // L1Pointer is pinned in REG_L1_POINTER; see the comment on the equivalent bfi in
+        // BranchOps.cpp's DEF_OP(ExitFunction) for why smashing its low bits here is safe.
+        bfi(ARMEmitter::Size::i64Bit, REG_L1_POINTER, RipReg.R(), FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)),
+            LookupCache::FIXED_L1_INDEX_BITS);
+
+        stp<ARMEmitter::IndexType::OFFSET>(TMP4, RipReg, REG_L1_POINTER);
+#else
         ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
 
         // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
@@ -229,6 +243,7 @@ void Dispatcher::EmitDispatcher() {
         add(TMP1, TMP1, TMP2);
 
         stp<ARMEmitter::IndexType::OFFSET>(TMP4, RipReg, TMP1);
+#endif
 
         // Jump to the block
         br(TMP4);
@@ -478,6 +493,12 @@ void Dispatcher::EmitDispatcher() {
 
     // First thing we need to move the thread state pointer back in to our register
     mov(STATE, ARMEmitter::XReg::x0);
+
+#ifndef ARCHITECTURE_arm64ec
+    // Re-pin the L1 lookup-cache base pointer in case this callback belongs to a different thread
+    // than whatever last ran through the main dispatcher entry above.
+    ldr(REG_L1_POINTER, STATE_PTR(CpuStateFrame, State.L1Pointer));
+#endif
 
     // Make sure to adjust the refcounter so we don't clear the cache now
     ldr(ARMEmitter::WReg::w2, STATE_PTR(CpuStateFrame, SignalHandlerRefCounter));

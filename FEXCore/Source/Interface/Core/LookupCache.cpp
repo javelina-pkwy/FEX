@@ -8,6 +8,7 @@ $end_info$
 
 #include <FEXCore/Utils/Allocator.h>
 #include <FEXCore/Utils/LogManager.h>
+#include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/HLE/SyscallHandler.h>
 
 #include "Interface/Context/Context.h"
@@ -24,7 +25,10 @@ GuestToHostMap::GuestToHostMap()
 LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
   : ctx {CTX} {
 
-  TotalCacheSize = ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE + MAX_L1_SIZE;
+  // Reserve for L2's maximum possible size (it grows/shrinks dynamically within this reservation, see
+  // UpdateDynamicL2Stats) plus extra padding so L1Pointer can be rounded up to a FIXED_L1_SIZE-aligned
+  // address below.
+  TotalCacheSize = ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + MAX_CODE_SIZE + MAX_L1_SIZE + FIXED_L1_SIZE;
 
   // Block cache ends up looking like this
   // PageMemoryMap[VirtualMemoryRegion >> 12]
@@ -45,7 +49,7 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
   FEXCore::Allocator::VirtualTHPControl(reinterpret_cast<const void*>(PagePointer), TotalCacheSize, FEXCore::Allocator::THPControl::Disable);
 
   FEXCore::Allocator::VirtualName("FEXMem_Lookup", reinterpret_cast<void*>(PagePointer),
-                                  ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE);
+                                  ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + MAX_CODE_SIZE);
   CTX->SyscallHandler->MarkOvercommitRange(PagePointer, TotalCacheSize);
 
   // Allocate our memory backing our pages
@@ -56,18 +60,18 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
   PageMemory = PagePointer + ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8;
 
   // L1 Cache
-  L1Pointer = PageMemory + CODE_SIZE;
+  // Placed after L2's *maximum* possible size (not its current, smaller starting size) so that L2
+  // growing at runtime never runs into L1's region. Round up to a FIXED_L1_SIZE-aligned address so
+  // that REG_L1_POINTER-relative JIT codegen can rely on the table's alignment (the padding for this
+  // rounding is reserved above in TotalCacheSize).
+  L1Pointer = FEXCore::AlignUp(PageMemory + MAX_CODE_SIZE, FIXED_L1_SIZE);
   FEXCore::Allocator::VirtualName("FEXMem_Lookup_L1", reinterpret_cast<void*>(L1Pointer), MAX_L1_SIZE);
 
   VirtualMemSize = ctx->Config.VirtualMemSize;
 
-  if (DynamicL1Cache()) {
-    // Start at minimum size when dynamic.
-    L1PointerMask = MIN_L1_ENTRIES - 1;
-  } else {
-    // Start at maximum instead.
-    L1PointerMask = MAX_L1_ENTRIES - 1;
-  }
+  // L1 is fixed-size (MIN_L1_ENTRIES == MAX_L1_ENTRIES == FIXED_L1_ENTRIES), so the mask never changes
+  // after this. This mirrors FIXED_L1_INDEX_MASK, which JIT codegen bakes in directly as an immediate.
+  L1PointerMask = FIXED_L1_INDEX_MASK;
 }
 
 LookupCache::~LookupCache() {
@@ -81,8 +85,10 @@ LookupCache::~LookupCache() {
 void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
   // Clear out the page memory
   // PagePointer and PageMemory are sequential with each other. Clear both at once.
+  // Always decommits up through MAX_CODE_SIZE (not just CurrentCodeSize) so nothing stale lingers
+  // from before a prior shrink -- CurrentCodeSize itself is left untouched by a clear, only the data.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
-                                      ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, false);
+                                      ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + MAX_CODE_SIZE, false);
   AllocateOffset = 0;
 }
 

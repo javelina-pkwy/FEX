@@ -73,10 +73,10 @@ namespace x64 {
     ARMEmitter::Reg::r8, ARMEmitter::Reg::r16, ARMEmitter::Reg::r17,
   };
 
-  constexpr std::array<ARMEmitter::Register, 7> RA = {
+  // x24 is pinned to REG_L1_POINTER (the L1 lookup-cache base pointer) and excluded from this pool.
+  constexpr std::array<ARMEmitter::Register, 6> RA = {
     // All these callee saved
-    ARMEmitter::Reg::r20, ARMEmitter::Reg::r21, ARMEmitter::Reg::r22, ARMEmitter::Reg::r23,
-    ARMEmitter::Reg::r24, ARMEmitter::Reg::r30, ARMEmitter::Reg::r18,
+    ARMEmitter::Reg::r20, ARMEmitter::Reg::r21, ARMEmitter::Reg::r22, ARMEmitter::Reg::r23, ARMEmitter::Reg::r30, ARMEmitter::Reg::r18,
   };
 
   constexpr unsigned RAPairs = 4;

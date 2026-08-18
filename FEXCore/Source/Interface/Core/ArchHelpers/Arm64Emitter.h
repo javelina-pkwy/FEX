@@ -47,6 +47,11 @@ constexpr auto REG_AF = ARMEmitter::Reg::r27;
 
 constexpr auto REG_CALLRET_SP = ARMEmitter::XReg::x25;
 
+// Pinned to the L1 lookup-cache table base pointer (LookupCache::L1Pointer), loaded once at JIT entry
+// rather than reloaded from CpuStateFrame on every indirect-branch lookup. Paired with the fixed-size
+// LookupCache::FIXED_L1_INDEX_MASK compile-time constant.
+constexpr auto REG_L1_POINTER = ARMEmitter::XReg::x24;
+
 // Vector temporaries
 constexpr auto VTMP1 = ARMEmitter::VReg::v0;
 constexpr auto VTMP2 = ARMEmitter::VReg::v1;

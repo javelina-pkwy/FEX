@@ -202,6 +202,18 @@ DEF_OP(ExitFunction) {
     }
 
     // L1 Cache
+#ifndef ARCHITECTURE_arm64ec
+    // L1Pointer is pinned in REG_L1_POINTER, 512KB-aligned so its low FIXED_L1_INDEX_BITS+entry-shift
+    // bits are always zero. bfi smashes exactly those low bits with the current index and leaves every
+    // other bit of REG_L1_POINTER untouched -- including on the *next* lookup, since bfi fully
+    // overwrites the targeted bitfield rather than merging with whatever index was smashed in there
+    // last time. So REG_L1_POINTER always reads back as a valid entry address immediately after this,
+    // with no need to ever reconstruct/reload a "clean" base pointer.
+    bfi(ARMEmitter::Size::i64Bit, REG_L1_POINTER, RipReg, FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)),
+        LookupCache::FIXED_L1_INDEX_BITS);
+
+    ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, REG_L1_POINTER, 0);
+#else
     ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
 
     // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
@@ -210,6 +222,7 @@ DEF_OP(ExitFunction) {
     add(TMP1, TMP1, TMP2);
 
     ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, TMP1, 0);
+#endif
 
     // Note: sub+cbnz used over cmp+br to preserve flags.
     sub(TMP1, TMP1, RipReg.X());
