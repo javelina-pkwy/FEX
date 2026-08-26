@@ -231,8 +231,15 @@ public:
       }
     }
 
-    if (HostPtr && DynamicL1Cache()) {
-      UpdateDynamicL2Stats();
+    if (HostPtr) {
+      // The same hit-rate heuristic drives whichever cache is resizable in the current mode: L1
+      // itself when DynamicL1Cache is set (legacy behaviour), otherwise L2's backing budget, since a
+      // pinned fixed-size L1 can no longer be resized out from under already-compiled code.
+      if (DynamicL1Cache()) {
+        UpdateDynamicL1Stats(Thread);
+      } else {
+        UpdateDynamicL2Stats();
+      }
     }
 
     FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedCacheMissCount, 1);
@@ -240,11 +247,56 @@ public:
     return HostPtr;
   }
 
-  // Ported from the old dynamic L1 resize heuristic (L1 is now fixed-size so its base pointer/mask
-  // can be pinned into JIT'd code). Same trigger condition and config knobs, but now grows/shrinks
-  // L2's page-block backing budget (CurrentCodeSize) instead of L1's mask. Unlike L1, no JIT-visible
-  // state needs updating here: L2 lookups walk PagePointer/PageMemory purely by non-null-pointer
-  // checks, so growing/shrinking the allocation budget is invisible to already-compiled code.
+  // Legacy dynamic L1 resizing, used when DynamicL1Cache is set. Only valid while the JIT is emitting
+  // the mask-loading L1 lookup sequence, since it mutates State.L1Mask out from under compiled code.
+  void UpdateDynamicL1Stats(FEXCore::Core::InternalThreadState* Thread) {
+    // If host pointer was found in L2 or L3, then add it to the counter.
+    // Keeping track not L1 misses, but specifically L2/L3 hits.
+    ++L2L3CacheHits;
+
+    const auto CurrentTime = std::chrono::system_clock::now();
+    const auto Period = CurrentTime - LastPeriod;
+    if (Period >= SamplePeriod) {
+      // If larger than the sample period then check if we need to increase L1 cache size.
+      const double AveragePerSecond = static_cast<double>(L2L3CacheHits) /
+                                      static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(Period).count()) * 1000.0;
+
+      if (AveragePerSecond >= DynamicL1CacheIncreaseCountHeuristic()) {
+        if (CurrentL1Entries < MAX_L1_ENTRIES) {
+          CurrentL1Entries <<= 1;
+          L1PointerMask = CurrentL1Entries - 1;
+
+          // Update the thread's L1 pointer mask to increase how much cache it uses.
+          // Since we're in C-code, this is safe to update here.
+          Thread->CurrentFrame->State.L1Mask = GetScaledL1PointerMask();
+        }
+      } else if (AveragePerSecond < DynamicL1CacheDecreaseCountHeuristic()) {
+        if (CurrentL1Entries > MIN_L1_ENTRIES) {
+          CurrentL1Entries >>= 1;
+          L1PointerMask = CurrentL1Entries - 1;
+
+          // Madvise the entries that we are dropping. Gives the memory back to the OS.
+          LookupCacheEntry* FirstZeroL1Entry = &reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries];
+          size_t ZeroMemorySize = (MAX_L1_ENTRIES - CurrentL1Entries) * sizeof(LookupCacheEntry);
+          FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, false);
+
+          // Update the thread's L1 pointer mask to increase how much cache it uses.
+          // Since we're in C-code, this is safe to update here.
+          Thread->CurrentFrame->State.L1Mask = GetScaledL1PointerMask();
+        }
+      }
+
+      // Update Last period to start again.
+      LastPeriod = CurrentTime;
+      L2L3CacheHits = 0;
+    }
+  }
+
+  // Ported from the old dynamic L1 resize heuristic, used when L1 is pinned to a fixed size so its
+  // base pointer/mask can be baked into JIT'd code. Same trigger condition and config knobs, but
+  // grows/shrinks L2's page-block backing budget (CurrentCodeSize) instead of L1's mask. Unlike L1, no
+  // JIT-visible state needs updating here: L2 lookups walk PagePointer/PageMemory purely by
+  // non-null-pointer checks, so resizing the allocation budget is invisible to compiled code.
   void UpdateDynamicL2Stats() {
     // If host pointer was found in L2 or L3, then add it to the counter.
     // Keeping track not L1 misses, but specifically L2/L3 hits.
@@ -462,19 +514,25 @@ private:
 
   size_t TotalCacheSize;
 
-  // L1 is a fixed FIXED_L1_ENTRIES entries (see public section above) so that its base pointer and
-  // index mask can be pinned/baked into JIT'd code. Dynamic resizing between these previously varied;
-  // both bounds are now pinned to the same fixed size.
-  constexpr static size_t MIN_L1_ENTRIES = FIXED_L1_ENTRIES;
-  constexpr static size_t MAX_L1_ENTRIES = FIXED_L1_ENTRIES;
+  // Legacy dynamic-L1 bounds, used when StaticL1Cache is disabled. Start with 8k entries in L1 to give
+  // 128KB of L1 cache to each thread, maxing out at 1 million entries for 16MB per thread.
+  // MAX_L1_ENTRIES also sizes the L1 reservation in both modes, so the static mode simply leaves the
+  // tail of that reservation untouched rather than needing a smaller one.
+  constexpr static size_t MIN_L1_ENTRIES = 8 * 1024;        // Must be a power of 2
+  constexpr static size_t MAX_L1_ENTRIES = 1 * 1024 * 1024; // Must be a power of 2
 
-  // L2's page-block backing storage is dynamically resizable between these bounds (the heuristic
-  // ported from L1's old dynamic sizing, see UpdateDynamicL2Stats). MAX_CODE_SIZE is reserved
-  // upfront so growing never needs to relocate PageMemory or anything built on top of it (L1Pointer).
+  // L2's page-block backing storage is dynamically resizable between these bounds when StaticL1Cache
+  // is enabled (the heuristic ported from L1's old dynamic sizing, see UpdateDynamicL2Stats).
+  // MAX_CODE_SIZE is reserved upfront so growing never needs to relocate PageMemory or anything built
+  // on top of it (L1Pointer).
   constexpr static size_t MIN_L2_ENTRIES = 16 * 1024;        // Must be a power of 2
   constexpr static size_t MAX_L2_ENTRIES = 16 * 1024 * 1024; // Must be a power of 2
   constexpr static size_t MIN_CODE_SIZE = MIN_L2_ENTRIES * sizeof(LookupCacheEntry);
   constexpr static size_t MAX_CODE_SIZE = MAX_L2_ENTRIES * sizeof(LookupCacheEntry);
+
+  // The fixed L2 budget used when StaticL1Cache is disabled, matching the legacy CODE_SIZE. In that
+  // mode the dynamic heuristic drives L1 instead, so L2 never resizes.
+  constexpr static size_t LEGACY_CODE_SIZE = 128 * 1024 * 1024;
 
   constexpr static size_t SIZE_PER_PAGE = FEXCore::Utils::FEX_PAGE_SIZE * sizeof(LookupCacheEntry);
   constexpr static size_t MAX_L1_SIZE = MAX_L1_ENTRIES * sizeof(LookupCacheEntry);
@@ -484,6 +542,7 @@ private:
   FEXCore::Context::ContextImpl* ctx;
   uint64_t VirtualMemSize {};
 
+  size_t CurrentL1Entries = MIN_L1_ENTRIES;
   size_t CurrentCodeSize = MIN_CODE_SIZE;
   uint64_t L2L3CacheHits {};
   std::chrono::time_point<std::chrono::system_clock> LastPeriod {};

@@ -69,9 +69,20 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
 
   VirtualMemSize = ctx->Config.VirtualMemSize;
 
-  // L1 is fixed-size (MIN_L1_ENTRIES == MAX_L1_ENTRIES == FIXED_L1_ENTRIES), so the mask never changes
-  // after this. This mirrors FIXED_L1_INDEX_MASK, which JIT codegen bakes in directly as an immediate.
-  L1PointerMask = FIXED_L1_INDEX_MASK;
+  if (DynamicL1Cache()) {
+    // Legacy behaviour: start L1 at its minimum size and let UpdateDynamicL1Stats grow it. L2 is held
+    // at the fixed legacy budget in this mode, since the heuristic is driving L1 instead.
+    CurrentL1Entries = MIN_L1_ENTRIES;
+    L1PointerMask = MIN_L1_ENTRIES - 1;
+    CurrentCodeSize = LEGACY_CODE_SIZE;
+  } else {
+    // L1 is pinned to FIXED_L1_ENTRIES, so the mask never changes after this. It mirrors
+    // FIXED_L1_INDEX_MASK, which JIT codegen bakes in directly as an immediate when pinning is on.
+    // L2 starts at its minimum and is grown by UpdateDynamicL2Stats instead.
+    CurrentL1Entries = FIXED_L1_ENTRIES;
+    L1PointerMask = FIXED_L1_INDEX_MASK;
+    CurrentCodeSize = MIN_CODE_SIZE;
+  }
 }
 
 LookupCache::~LookupCache() {

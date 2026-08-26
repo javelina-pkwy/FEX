@@ -427,6 +427,16 @@ void ReloadMetaLayer() {
     // Single stepping also enforces single instruction size blocks
     Set(FEXCore::Config::ConfigOption::CONFIG_MAXINST, "1");
   }
+
+  if (FEXCore::Config::Exists(FEXCore::Config::CONFIG_DYNAMICL1CACHE) &&
+      Meta->GetConv<bool>(FEXCore::Config::CONFIG_DYNAMICL1CACHE).value_or(false)) {
+    // Pinning the L1 base pointer bakes a fixed table size into JIT'd code, so it cannot coexist with
+    // a dynamically resized L1. Dynamic sizing wins; warn rather than silently ignoring the request.
+    if (Meta->GetConv<bool>(FEXCore::Config::CONFIG_PINL1POINTER).value_or(true)) {
+      LogMan::Msg::IFmt("PinL1Pointer requires a fixed-size L1 cache, disabling it as DynamicL1Cache is enabled.");
+    }
+    Set(FEXCore::Config::ConfigOption::CONFIG_PINL1POINTER, "0");
+  }
 }
 
 void AddLayer(fextl::unique_ptr<FEXCore::Config::Layer> _Layer) {

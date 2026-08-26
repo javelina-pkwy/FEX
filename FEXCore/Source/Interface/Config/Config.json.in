@@ -276,7 +276,7 @@
       },
       "DisableL2Cache": {
         "Type": "bool",
-        "Default": "true",
+        "Default": "false",
         "AffectsCodeGen": "false",
         "Desc": [
           "Disables FEXCore's JIT L2 cache lookup. Saving memory.",
@@ -285,11 +285,23 @@
       },
       "DynamicL1Cache": {
         "Type": "bool",
-        "Default": "true",
+        "Default": "false",
         "AffectsCodeGen": "false",
         "Desc": [
           "Switches FEXCore's JIT L1 cache to be dynamically sized. Saving memory.",
-          "Can potentially introduce more stutters."
+          "Can potentially introduce more stutters.",
+          "When disabled, L1 is instead pinned to a fixed size, and the dynamic sizing is applied",
+          "to the L2 backing store instead."
+        ]
+      },
+      "PinL1Pointer": {
+        "Type": "bool",
+        "Default": "true",
+        "Desc": [
+          "Pins the JIT L1 cache base pointer in a dedicated host register, letting the L1 lookup",
+          "be done in two instructions instead of five.",
+          "Costs one register out of the register allocator's pool.",
+          "Requires a fixed-size L1, so this has no effect when DynamicL1Cache is enabled."
         ]
       },
       "DynamicL1CacheIncreaseCountHeuristic": {

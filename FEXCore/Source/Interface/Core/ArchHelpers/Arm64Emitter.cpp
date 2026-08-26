@@ -73,10 +73,18 @@ namespace x64 {
     ARMEmitter::Reg::r8, ARMEmitter::Reg::r16, ARMEmitter::Reg::r17,
   };
 
-  // x24 is pinned to REG_L1_POINTER (the L1 lookup-cache base pointer) and excluded from this pool.
-  constexpr std::array<ARMEmitter::Register, 6> RA = {
+  // Two variants selected at runtime by UsesPinnedL1Pointer(): with pinning on, x24 is reserved for
+  // REG_L1_POINTER and dropped from the pool. x24 is taken from the unpaired tail so RAPairs stays at
+  // 4 either way, keeping (r20,r21) and (r22,r23) intact.
+  constexpr std::array<ARMEmitter::Register, 6> RA_PinnedL1 = {
     // All these callee saved
     ARMEmitter::Reg::r20, ARMEmitter::Reg::r21, ARMEmitter::Reg::r22, ARMEmitter::Reg::r23, ARMEmitter::Reg::r30, ARMEmitter::Reg::r18,
+  };
+
+  constexpr std::array<ARMEmitter::Register, 7> RA = {
+    // All these callee saved
+    ARMEmitter::Reg::r20, ARMEmitter::Reg::r21, ARMEmitter::Reg::r22, ARMEmitter::Reg::r23,
+    ARMEmitter::Reg::r24, ARMEmitter::Reg::r30, ARMEmitter::Reg::r18,
   };
 
   constexpr unsigned RAPairs = 4;
@@ -114,6 +122,11 @@ namespace x64 {
   constexpr std::array<ARMEmitter::VRegister, 6> PreserveAll_DynamicFPR = {
     ARMEmitter::VReg::v2, ARMEmitter::VReg::v3, ARMEmitter::VReg::v4, ARMEmitter::VReg::v5, ARMEmitter::VReg::v6, ARMEmitter::VReg::v7,
   };
+
+  // REG_L1_POINTER (x24) is callee saved here, so it never appears in the dynamic spill lists and
+  // pinning does not change them. Aliased so the selection logic can be written without an #ifdef.
+  constexpr auto& PreserveAll_Dynamic_PinnedL1 = PreserveAll_Dynamic;
+  constexpr auto& NotPreserved_Dynamic_PinnedL1 = NotPreserved_Dynamic;
 #else
   constexpr std::array<ARMEmitter::Register, 18> SRA = {
     ARMEmitter::Reg::r8,
@@ -143,19 +156,31 @@ namespace x64 {
     ARMEmitter::Reg::r4, ARMEmitter::Reg::r5, ARMEmitter::Reg::r8,
   };
 
-  // x16 is pinned to REG_L1_POINTER and excluded from this pool. It is taken from the unpaired tail
-  // rather than from r14/r15 so that RAPairs can stay at 4, keeping both (r6,r7) and (r14,r15) intact.
-  // r16 is likewise dropped from the dynamic spill lists below: a pinned REG_L1_POINTER is never
-  // spilled, it is rematerialized from CpuStateFrame in FillStaticRegs instead.
-  constexpr std::array<ARMEmitter::Register, 5> RA = {
+  // Two variants selected at runtime by UsesPinnedL1Pointer(). With pinning on, x16 is reserved for
+  // REG_L1_POINTER and dropped from the pool. It is taken from the unpaired tail rather than from
+  // r14/r15 so that RAPairs stays at 4 either way, keeping both (r6,r7) and (r14,r15) intact.
+  // r16 is likewise dropped from the dynamic spill lists: a pinned REG_L1_POINTER is never spilled, it
+  // is rematerialized from CpuStateFrame in FillStaticRegs instead.
+  constexpr std::array<ARMEmitter::Register, 5> RA_PinnedL1 = {
     ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r30,
   };
 
-  constexpr std::array<ARMEmitter::Register, 4> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r17,
-                                                                       ARMEmitter::Reg::r30};
+  constexpr std::array<ARMEmitter::Register, 6> RA = {
+    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r30,
+  };
 
-  constexpr std::array<ARMEmitter::Register, 6> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r14,
-                                                                        ARMEmitter::Reg::r15, ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+  constexpr std::array<ARMEmitter::Register, 4> PreserveAll_Dynamic_PinnedL1 = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7,
+                                                                                ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+
+  constexpr std::array<ARMEmitter::Register, 5> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r16,
+                                                                       ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+
+  constexpr std::array<ARMEmitter::Register, 6> NotPreserved_Dynamic_PinnedL1 = {
+    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+
+  constexpr std::array<ARMEmitter::Register, 7> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r14,
+                                                                        ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r17,
+                                                                        ARMEmitter::Reg::r30};
 
   constexpr unsigned RAPairs = 4;
 
@@ -246,6 +271,29 @@ namespace x32 {
     // PF/AF must be last.
     REG_PF,
     REG_AF,
+  };
+
+  // As with x64, two variants selected at runtime by UsesPinnedL1Pointer(). r24 sits past the first
+  // RAPairs(10) entries, so dropping it for REG_L1_POINTER leaves every pair intact.
+  constexpr std::array<ARMEmitter::Register, 13> RA_PinnedL1 = {
+    // All these callee saved
+    ARMEmitter::Reg::r20,
+    ARMEmitter::Reg::r21,
+    ARMEmitter::Reg::r22,
+    ARMEmitter::Reg::r23,
+
+    // Registers only available on 32-bit
+    // All these are caller saved (except for r19).
+    ARMEmitter::Reg::r12,
+    ARMEmitter::Reg::r13,
+    ARMEmitter::Reg::r14,
+    ARMEmitter::Reg::r15,
+    ARMEmitter::Reg::r16,
+    ARMEmitter::Reg::r17,
+    ARMEmitter::Reg::r29,
+    ARMEmitter::Reg::r30,
+
+    ARMEmitter::Reg::r19,
   };
 
   constexpr std::array<ARMEmitter::Register, 14> RA = {
@@ -388,10 +436,13 @@ Arm64Emitter::Arm64Emitter(FEXCore::Context::ContextImpl* ctx, void* EmissionPtr
 #endif
 
   // Number of register available is dependent on what operating mode the proccess is in.
+  // When the L1 base pointer is pinned, REG_L1_POINTER is reserved and drops out of the pool.
+  const bool PinnedL1 = EmitterCTX->UsesPinnedL1Pointer();
   if (EmitterCTX->Config.Is64BitMode()) {
     StaticRegisters = x64::SRA;
-    GeneralRegisters = x64::RA;
-    GeneralRegistersNotPreserved = x64::NotPreserved_Dynamic;
+    GeneralRegisters = PinnedL1 ? std::span<const ARMEmitter::Register> {x64::RA_PinnedL1} : std::span<const ARMEmitter::Register> {x64::RA};
+    GeneralRegistersNotPreserved = PinnedL1 ? std::span<const ARMEmitter::Register> {x64::NotPreserved_Dynamic_PinnedL1} :
+                                              std::span<const ARMEmitter::Register> {x64::NotPreserved_Dynamic};
     StaticFPRegisters = x64::SRAFPR;
     GeneralFPRegisters = x64::RAFPR;
     PairRegisters = x64::RAPairs;
@@ -399,7 +450,7 @@ Arm64Emitter::Arm64Emitter(FEXCore::Context::ContextImpl* ctx, void* EmissionPtr
     PairRegisters = x32::RAPairs;
 
     StaticRegisters = x32::SRA;
-    GeneralRegisters = x32::RA;
+    GeneralRegisters = PinnedL1 ? std::span<const ARMEmitter::Register> {x32::RA_PinnedL1} : std::span<const ARMEmitter::Register> {x32::RA};
     GeneralRegistersNotPreserved = x32::NotPreserved_Dynamic;
 
     StaticFPRegisters = x32::SRAFPR;
@@ -824,7 +875,11 @@ void Arm64Emitter::FillStaticRegs(FillStaticRegOptions Options) {
   // This covers both host-call paths: FillForABICall reaches here via FillStaticRegs directly, and
   // FillForPreserveAllABICall also calls FillStaticRegs before popping its dynamic registers. The one
   // re-entry that does not come through here is the EC dispatcher entry, which reloads it inline.
-  ldr(REG_L1_POINTER, STATE.R(), offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+  //
+  // Gated because with pinning disabled this register is back in the register allocator's pool.
+  if (EmitterCTX->UsesPinnedL1Pointer()) {
+    ldr(REG_L1_POINTER, STATE.R(), offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+  }
 #endif
 
   if (Options.NZCV) {
@@ -1045,7 +1100,8 @@ size_t Arm64Emitter::SpillForPreserveAllABICall(ARMEmitter::Register TmpReg, boo
   uint32_t PreserveSRAMask {};
   uint32_t PreserveSRAFPRMask {};
   if (EmitterCTX->Config.Is64BitMode()) {
-    DynamicGPRs = x64::PreserveAll_Dynamic;
+    DynamicGPRs = EmitterCTX->UsesPinnedL1Pointer() ? std::span<const ARMEmitter::Register> {x64::PreserveAll_Dynamic_PinnedL1} :
+                                                     std::span<const ARMEmitter::Register> {x64::PreserveAll_Dynamic};
     DynamicFPRs = x64::PreserveAll_DynamicFPR;
     PreserveSRAMask = x64::PreserveAll_SRAMask;
     PreserveSRAFPRMask = x64::PreserveAll_SRAFPRMask;
@@ -1100,7 +1156,8 @@ void Arm64Emitter::FillForPreserveAllABICall(bool FPRs) {
   uint32_t PreserveSRAFPRMask {};
 
   if (EmitterCTX->Config.Is64BitMode()) {
-    DynamicGPRs = x64::PreserveAll_Dynamic;
+    DynamicGPRs = EmitterCTX->UsesPinnedL1Pointer() ? std::span<const ARMEmitter::Register> {x64::PreserveAll_Dynamic_PinnedL1} :
+                                                     std::span<const ARMEmitter::Register> {x64::PreserveAll_Dynamic};
     DynamicFPRs = x64::PreserveAll_DynamicFPR;
     PreserveSRAMask = x64::PreserveAll_SRAMask;
     PreserveSRAFPRMask = x64::PreserveAll_SRAFPRMask;

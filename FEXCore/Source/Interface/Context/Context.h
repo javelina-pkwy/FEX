@@ -371,7 +371,22 @@ public:
     FEX_CONFIG_OPT(SmallTSCScale, SMALLTSCSCALE);
     FEX_CONFIG_OPT(StrictInProcessSplitLocks, STRICTINPROCESSSPLITLOCKS);
     FEX_CONFIG_OPT(MonoHacks, MONOHACKS);
+    // Read by LookupCache to pick the L1 sizing policy, and by the JIT/Dispatcher at emission time to
+    // pick the L1 lookup sequence. Always combine them via UsesPinnedL1Pointer() rather than reading
+    // PinL1Pointer directly, so every consumer resolves the dependency the same way.
+    FEX_CONFIG_OPT(DynamicL1Cache, DYNAMICL1CACHE);
+    FEX_CONFIG_OPT(PinL1Pointer, PINL1POINTER);
   } Config;
+
+  // Whether the JIT pins the L1 lookup table base in REG_L1_POINTER and indexes it with a bfi against
+  // a compile-time constant mask, rather than reloading base+mask from CpuStateFrame per lookup.
+  //
+  // Pinning requires a fixed-size L1: the pinned register holds a base whose low bits get smashed with
+  // the index, which only round-trips if the table size (and therefore the mask) never changes. So a
+  // dynamically-sized L1 forces pinning off regardless of how PinL1Pointer is set.
+  bool UsesPinnedL1Pointer() const {
+    return !Config.DynamicL1Cache() && Config.PinL1Pointer();
+  }
 
   FEXCore::Utils::WritePriorityMutex::Mutex CodeInvalidationMutex {};
 
