@@ -86,6 +86,16 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
 }
 
 LookupCache::~LookupCache() {
+  if (getenv("FEX_L1L2STATS")) {
+    const uint64_t Lookups = Diag.L1Hits + Diag.L1Misses;
+    const double MissPct = Lookups ? static_cast<double>(Diag.L1Misses) / static_cast<double>(Lookups) * 100.0 : 0.0;
+    LogMan::Msg::IFmt("[L1L2STATS] mode={} L1={}KB/{}ent lookups={} L1miss={} ({:.2f}%) L2clears={} L2grow={} "
+                      "L2shrink={} L1resize={} finalL2={}KB/{}pages",
+                      DynamicL1Cache() ? "dynamicL1" : (ctx->UsesPinnedL1Pointer() ? "fixedL1+pinned" : "fixedL1"),
+                      (L1PointerMask + 1) * sizeof(LookupCacheEntry) / 1024, L1PointerMask + 1, Lookups, Diag.L1Misses, MissPct,
+                      Diag.L2Clears, Diag.L2Grows, Diag.L2Shrinks, Diag.L1Resizes, CurrentCodeSize / 1024, CurrentCodeSize / SIZE_PER_PAGE);
+  }
+
   FEXCore::Allocator::VirtualFree(reinterpret_cast<void*>(PagePointer), TotalCacheSize);
   ctx->SyscallHandler->UnmarkOvercommitRange(PagePointer, TotalCacheSize);
 
@@ -101,6 +111,7 @@ void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
                                       ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + MAX_CODE_SIZE, false);
   AllocateOffset = 0;
+  FEX_L1L2_DIAG_INC(Diag.L2Clears);
 }
 
 void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken&) {

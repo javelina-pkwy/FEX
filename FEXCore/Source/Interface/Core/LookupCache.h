@@ -19,6 +19,19 @@
 #include <utility>
 #include <mutex>
 
+// Diagnostic counters for L1/L2 cache capacity behaviour. Compiled out entirely by default so they
+// cost nothing on the lookup path; build with -DFEXCORE_ENABLE_L1L2_DIAG=1 and run with FEX_L1L2STATS=1
+// to get a once-per-second dump of hit rates, cache wipes and resize activity.
+#ifndef FEXCORE_ENABLE_L1L2_DIAG
+#define FEXCORE_ENABLE_L1L2_DIAG 0
+#endif
+
+#if FEXCORE_ENABLE_L1L2_DIAG
+#define FEX_L1L2_DIAG_INC(x) (++(x))
+#else
+#define FEX_L1L2_DIAG_INC(x) ((void)0)
+#endif
+
 namespace FEXCore {
 struct LookupCacheBaseLockToken {
 protected:
@@ -170,7 +183,15 @@ public:
   // The L1 table is fixed at this size so the JIT can pin its base pointer in a dedicated register
   // (REG_L1_POINTER) and treat the index mask as a compile-time constant, rather than reloading
   // both from CpuStateFrame on every lookup. See BranchOps.cpp/Dispatcher.cpp L1 lookup codegen.
-  constexpr static size_t FIXED_L1_SIZE = 512 * 1024; // Must be a power of 2.
+  //
+  // Sized against what the legacy dynamically-sized L1 actually converged to under load: instrumenting
+  // a Geekbench Clang run showed it growing to 2MB / 131072 entries. The previous 512KB fixed size was
+  // a quarter of that, so branch-heavy workloads were capacity-bound relative to the old behaviour.
+  //
+  // Must stay <= MAX_L1_SIZE, which is what the constructor reserves. The backing is committed lazily,
+  // but note L1 is RIP-hashed so a large table scatters touches across most of its pages -- this is
+  // per-thread memory that is genuinely used, unlike the L2 budget bound.
+  constexpr static size_t FIXED_L1_SIZE = 2 * 1024 * 1024; // Must be a power of 2.
   constexpr static size_t FIXED_L1_ENTRIES = FIXED_L1_SIZE / sizeof(LookupCacheEntry);
   constexpr static size_t FIXED_L1_INDEX_MASK = FIXED_L1_ENTRIES - 1;
   constexpr static size_t FIXED_L1_INDEX_BITS = FEXCore::ilog2(FIXED_L1_ENTRIES);
@@ -189,8 +210,10 @@ public:
     // Try L1, no lock needed
     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1PointerMask];
     if (L1Entry.GuestCode == Address) {
+      FEX_L1L2_DIAG_INC(Diag.L1Hits);
       return L1Entry.HostCode;
     }
+    FEX_L1L2_DIAG_INC(Diag.L1Misses);
 
     // L2 and L3 need to be locked
     uintptr_t HostPtr {};
@@ -264,6 +287,7 @@ public:
       if (AveragePerSecond >= DynamicL1CacheIncreaseCountHeuristic()) {
         if (CurrentL1Entries < MAX_L1_ENTRIES) {
           CurrentL1Entries <<= 1;
+          FEX_L1L2_DIAG_INC(Diag.L1Resizes);
           L1PointerMask = CurrentL1Entries - 1;
 
           // Update the thread's L1 pointer mask to increase how much cache it uses.
@@ -273,6 +297,7 @@ public:
       } else if (AveragePerSecond < DynamicL1CacheDecreaseCountHeuristic()) {
         if (CurrentL1Entries > MIN_L1_ENTRIES) {
           CurrentL1Entries >>= 1;
+          FEX_L1L2_DIAG_INC(Diag.L1Resizes);
           L1PointerMask = CurrentL1Entries - 1;
 
           // Madvise the entries that we are dropping. Gives the memory back to the OS.
@@ -285,6 +310,8 @@ public:
           Thread->CurrentFrame->State.L1Mask = GetScaledL1PointerMask();
         }
       }
+
+      DumpDiagCounters();
 
       // Update Last period to start again.
       LastPeriod = CurrentTime;
@@ -312,10 +339,12 @@ public:
       if (AveragePerSecond >= DynamicL1CacheIncreaseCountHeuristic()) {
         if (CurrentCodeSize < MAX_CODE_SIZE) {
           CurrentCodeSize <<= 1;
+          FEX_L1L2_DIAG_INC(Diag.L2Grows);
         }
       } else if (AveragePerSecond < DynamicL1CacheDecreaseCountHeuristic()) {
         if (CurrentCodeSize > MIN_CODE_SIZE) {
           CurrentCodeSize >>= 1;
+          FEX_L1L2_DIAG_INC(Diag.L2Shrinks);
 
           // Madvise the page-block backing that we are dropping. Gives the memory back to the OS.
           // Any already-allocated page blocks beyond the new boundary become unreachable garbage:
@@ -327,6 +356,8 @@ public:
           FEXCore::Allocator::VirtualDontNeed(FirstZeroByte, ZeroMemorySize, false);
         }
       }
+
+      DumpDiagCounters();
 
       // Update Last period to start again.
       LastPeriod = CurrentTime;
@@ -495,9 +526,24 @@ private:
     uintptr_t NewEnd = AllocateOffset + SIZE_PER_PAGE;
 
     if (NewEnd >= CurrentCodeSize) {
-      // We ran out of block backing space. Need to clear the block cache and tell the JIT cores to clear their caches as well
-      // Tell whatever is calling this that it needs to do it.
-      return 0;
+      // Out of block backing space within the current budget. Growing is far cheaper than clearing:
+      // the full MAX_CODE_SIZE is already reserved upfront, so this just moves a bound and commits
+      // lazily on fault. Clearing, by contrast, throws away every block mapping in L2 and madvises the
+      // whole region, forcing everything to be looked up through L3 again.
+      //
+      // Growth was previously driven solely by the once-per-second hit-rate heuristic in
+      // UpdateDynamicL2Stats, which is not coupled to exhaustion at all. That left exhaustion as the
+      // fast path: a workload whose working set outran the current budget would wipe the cache
+      // thousands of times per second while waiting for the heuristic to catch up.
+      while (NewEnd >= CurrentCodeSize && CurrentCodeSize < MAX_CODE_SIZE) {
+        CurrentCodeSize <<= 1;
+        FEX_L1L2_DIAG_INC(Diag.L2GrowsOnDemand);
+      }
+
+      if (NewEnd >= CurrentCodeSize) {
+        // Genuinely at the maximum. Now a clear is the only option; tell the caller to do it.
+        return 0;
+      }
     }
 
     AllocateOffset = NewEnd;
@@ -525,7 +571,15 @@ private:
   // is enabled (the heuristic ported from L1's old dynamic sizing, see UpdateDynamicL2Stats).
   // MAX_CODE_SIZE is reserved upfront so growing never needs to relocate PageMemory or anything built
   // on top of it (L1Pointer).
-  constexpr static size_t MIN_L2_ENTRIES = 16 * 1024;        // Must be a power of 2
+  // MIN_L2_ENTRIES is the floor the dynamic sizing will not shrink below. It was previously 16k
+  // entries = 256KB, which is only 4 guest code pages (SIZE_PER_PAGE is 64KB of backing per page) --
+  // small enough that any real workload exhausted it immediately. 512k entries = 8MB = 128 pages is
+  // where measured L2 exhaustion stopped occurring for Clang-like workloads.
+  //
+  // This costs little: CurrentCodeSize is only a budget bound, and the backing is committed lazily on
+  // fault, so a process that never uses 128 pages of code never pays for them. The floor only limits
+  // how far UpdateDynamicL2Stats can decommit back to the OS.
+  constexpr static size_t MIN_L2_ENTRIES = 512 * 1024;       // Must be a power of 2
   constexpr static size_t MAX_L2_ENTRIES = 16 * 1024 * 1024; // Must be a power of 2
   constexpr static size_t MIN_CODE_SIZE = MIN_L2_ENTRIES * sizeof(LookupCacheEntry);
   constexpr static size_t MAX_CODE_SIZE = MAX_L2_ENTRIES * sizeof(LookupCacheEntry);
@@ -544,6 +598,38 @@ private:
 
   size_t CurrentL1Entries = MIN_L1_ENTRIES;
   size_t CurrentCodeSize = MIN_CODE_SIZE;
+
+public:
+  // Diagnostic counters for investigating L1/L2 capacity behaviour. Per-thread (one LookupCache per
+  // thread), so these are plain non-atomic counters. Dumped at destruction when FEX_L1L2STATS is set.
+  struct DiagCounters {
+    uint64_t L1Hits {};
+    uint64_t L1Misses {};
+    uint64_t L2Clears {};   // full ClearL2Cache() wipes caused by running out of backing store
+    uint64_t L2Grows {};    // dynamic doublings of CurrentCodeSize (hit-rate heuristic)
+    uint64_t L2GrowsOnDemand {}; // doublings forced by running out of backing store
+    uint64_t L2Shrinks {};
+    uint64_t L1Resizes {};  // legacy dynamic-L1 mode only
+  } Diag;
+
+  // Dumped once per sampling period when FEX_L1L2STATS is set. Done here rather than in the destructor
+  // because FEX exits without tearing down thread state, so ~LookupCache never runs in practice.
+  void DumpDiagCounters() {
+#if FEXCORE_ENABLE_L1L2_DIAG
+    static const bool Enabled = getenv("FEX_L1L2STATS") != nullptr;
+    if (!Enabled) {
+      return;
+    }
+    const uint64_t Slow = Diag.L1Hits + Diag.L1Misses;
+    LogMan::Msg::IFmt("[L1L2STATS] mode={} L1={}KB/{}ent slowpath={} L2clears={} L2grow={} L2shrink={} "
+                      "L1resize={} L2ondemand={} L2now={}KB/{}pages",
+                      DynamicL1Cache() ? "dynamicL1" : "fixedL1", (L1PointerMask + 1) * sizeof(LookupCacheEntry) / 1024,
+                      L1PointerMask + 1, Slow, Diag.L2Clears, Diag.L2Grows, Diag.L2Shrinks, Diag.L1Resizes,
+                      Diag.L2GrowsOnDemand, CurrentCodeSize / 1024, CurrentCodeSize / SIZE_PER_PAGE);
+#endif
+  }
+
+private:
   uint64_t L2L3CacheHits {};
   std::chrono::time_point<std::chrono::system_clock> LastPeriod {};
   constexpr static std::chrono::seconds SamplePeriod {1};
