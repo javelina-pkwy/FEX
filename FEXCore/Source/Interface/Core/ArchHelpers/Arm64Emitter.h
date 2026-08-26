@@ -72,6 +72,21 @@ constexpr auto REG_AF = ARMEmitter::Reg::r24;
 
 constexpr auto REG_CALLRET_SP = ARMEmitter::XReg::x17;
 
+// Pinned to the L1 lookup-cache table base pointer, same role as on the AArch64 build. Taken from the
+// unpaired tail of the RA pool so RAPairs can stay at 4, see Arm64Emitter.cpp.
+//
+// Unlike x24 on AArch64 (callee saved, so a pin just survives host calls for free), x16 is volatile
+// under both the ARM64EC ABI and `preserve_all`, so it cannot be pinned once and left alone. It is
+// instead rematerialized from CpuStateFrame at exactly the points REG_CALLRET_SP is reloaded --
+// FillStaticRegs (which covers both the normal and `preserve_all` call paths) and the EC dispatcher
+// entry in Dispatcher.cpp. Rematerializing rather than spill/filling is sound because the value is a
+// pure function of thread state that only C++ code ever changes.
+//
+// x16 being IP0 is not a hazard inside JIT code for the same reason x17/IP1 already works as
+// REG_CALLRET_SP: the EC transition stubs in Module.S that scratch it only run once the JIT has
+// spilled its state, and every path back into JIT code goes through a rematerialization point.
+constexpr auto REG_L1_POINTER = ARMEmitter::XReg::x16;
+
 // Vector temporaries
 constexpr auto VTMP1 = ARMEmitter::VReg::v16;
 constexpr auto VTMP2 = ARMEmitter::VReg::v17;

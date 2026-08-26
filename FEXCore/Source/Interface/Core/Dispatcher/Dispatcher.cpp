@@ -83,7 +83,9 @@ void Dispatcher::EmitDispatcher() {
 
 #ifndef ARCHITECTURE_arm64ec
   // Pin the L1 lookup-cache base pointer for the lifetime of this JIT execution. It never changes
-  // (the L1 table is fixed-size), so unlike other pinned state this doesn't need refilling elsewhere.
+  // (the L1 table is fixed-size), and REG_L1_POINTER is callee saved here, so this single pin holds.
+  // ARM64EC gets the equivalent from the FillStaticRegs immediately below, where it is rematerialized
+  // on every re-entry because its REG_L1_POINTER is volatile.
   ldr(REG_L1_POINTER, STATE_PTR(CpuStateFrame, State.L1Pointer));
 #endif
 
@@ -126,6 +128,12 @@ void Dispatcher::EmitDispatcher() {
   add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, TMP1, 0);
 
   ldr(REG_CALLRET_SP, STATE_PTR(CpuStateFrame, State.callret_sp));
+
+  // Rematerialize the pinned L1 lookup-cache base pointer. This entry deliberately skips
+  // FillStaticRegs (the usual rematerialization point), and the opportunistic call-ret return below
+  // can branch straight back into JIT code, so REG_L1_POINTER has to be restored here explicitly.
+  // x16 is dead on arrival here -- Module.S's enter_jit only uses it to hold this very address.
+  ldr(REG_L1_POINTER, STATE_PTR(CpuStateFrame, State.L1Pointer));
 
   FillSpecialRegs(TMP1, TMP2, {.SetFIZ = false, .SetPredRegs = true});
 
@@ -227,23 +235,12 @@ void Dispatcher::EmitDispatcher() {
       // If we've made it here then we have a real compiled block
       {
         // update L1 cache
-#ifndef ARCHITECTURE_arm64ec
         // L1Pointer is pinned in REG_L1_POINTER; see the comment on the equivalent bfi in
         // BranchOps.cpp's DEF_OP(ExitFunction) for why smashing its low bits here is safe.
         bfi(ARMEmitter::Size::i64Bit, REG_L1_POINTER, RipReg.R(), FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)),
             LookupCache::FIXED_L1_INDEX_BITS);
 
         stp<ARMEmitter::IndexType::OFFSET>(TMP4, RipReg, REG_L1_POINTER);
-#else
-        ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
-
-        // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
-        // L1Mask is pre-shifted.
-        and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, RipReg.R(), ARMEmitter::ShiftType::LSL, FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
-        add(TMP1, TMP1, TMP2);
-
-        stp<ARMEmitter::IndexType::OFFSET>(TMP4, RipReg, TMP1);
-#endif
 
         // Jump to the block
         br(TMP4);
@@ -496,7 +493,8 @@ void Dispatcher::EmitDispatcher() {
 
 #ifndef ARCHITECTURE_arm64ec
     // Re-pin the L1 lookup-cache base pointer in case this callback belongs to a different thread
-    // than whatever last ran through the main dispatcher entry above.
+    // than whatever last ran through the main dispatcher entry above. As above, ARM64EC instead picks
+    // this up from the FillStaticRegs further down.
     ldr(REG_L1_POINTER, STATE_PTR(CpuStateFrame, State.L1Pointer));
 #endif
 

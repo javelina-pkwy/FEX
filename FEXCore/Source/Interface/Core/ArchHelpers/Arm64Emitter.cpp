@@ -143,16 +143,19 @@ namespace x64 {
     ARMEmitter::Reg::r4, ARMEmitter::Reg::r5, ARMEmitter::Reg::r8,
   };
 
-  constexpr std::array<ARMEmitter::Register, 6> RA = {
-    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r30,
+  // x16 is pinned to REG_L1_POINTER and excluded from this pool. It is taken from the unpaired tail
+  // rather than from r14/r15 so that RAPairs can stay at 4, keeping both (r6,r7) and (r14,r15) intact.
+  // r16 is likewise dropped from the dynamic spill lists below: a pinned REG_L1_POINTER is never
+  // spilled, it is rematerialized from CpuStateFrame in FillStaticRegs instead.
+  constexpr std::array<ARMEmitter::Register, 5> RA = {
+    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r30,
   };
 
-  constexpr std::array<ARMEmitter::Register, 5> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r16,
-                                                                       ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+  constexpr std::array<ARMEmitter::Register, 4> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r17,
+                                                                       ARMEmitter::Reg::r30};
 
-  constexpr std::array<ARMEmitter::Register, 7> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r14,
-                                                                        ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r17,
-                                                                        ARMEmitter::Reg::r30};
+  constexpr std::array<ARMEmitter::Register, 6> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r14,
+                                                                        ARMEmitter::Reg::r15, ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
 
   constexpr unsigned RAPairs = 4;
 
@@ -812,6 +815,17 @@ void Arm64Emitter::FillStaticRegs(FillStaticRegOptions Options) {
 #endif
 
   ldr(REG_CALLRET_SP, STATE.R(), offsetof(FEXCore::Core::CpuStateFrame, State.callret_sp));
+
+#ifdef ARCHITECTURE_arm64ec
+  // Rematerialize the pinned L1 lookup-cache base pointer. REG_L1_POINTER is volatile under the EC
+  // ABI, and JIT'd code additionally smashes its low bits with the current index (see the bfi in
+  // BranchOps.cpp), so it has to be restored to a clean base on every re-entry rather than spilled.
+  //
+  // This covers both host-call paths: FillForABICall reaches here via FillStaticRegs directly, and
+  // FillForPreserveAllABICall also calls FillStaticRegs before popping its dynamic registers. The one
+  // re-entry that does not come through here is the EC dispatcher entry, which reloads it inline.
+  ldr(REG_L1_POINTER, STATE.R(), offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+#endif
 
   if (Options.NZCV) {
     // Regardless of what GPRs/FPRs we're filling, we need to fill NZCV since it
