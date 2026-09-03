@@ -287,14 +287,15 @@ int main(int argc, char** argv, char** const envp) {
   const bool SupportsRDPID = Feature.Feat_rdpid;
   const bool SupportsCLFLOPT = Feature.Feat_clflopt;
   const bool SupportsFSGSBase = Feature.Feat_fsgsbase;
+  const bool SupportsAVXVNNI = Feature.Feat_avx_vnni;
 
   TestUnsupported |=
     (!Supports3DNow && Loader.Requires3DNow()) || (!SupportsSSE4A && Loader.RequiresSSE4A()) || (!SupportsBMI1 && Loader.RequiresBMI1()) ||
     (!SupportsBMI2 && Loader.RequiresBMI2()) || (!SupportsCLWB && Loader.RequiresCLWB()) || (!SupportsSSSE3 && Loader.RequiresSSSE3()) ||
-    (!SupportsSSE4_1 && Loader.RequiresSSE4_1()) || (!SupportsSSE4_2 && Loader.RequiresSSE4_2()) ||
-    (!SupportsAES && Loader.RequiresAES()) || (!SupportsPCLMUL && Loader.RequiresPCLMUL()) || (!SupportsMOVBE && Loader.RequiresMOVBE()) ||
-    (!SupportsADX && Loader.RequiresADX()) || (!SupportsXSAVE && Loader.RequiresXSAVE()) || (!SupportsRDPID && Loader.RequiresRDPID()) ||
-    (!SupportsCLFLOPT && Loader.RequiresCLFLOPT()) || (!SupportsFSGSBase && Loader.RequiresFSGSBase()) || Loader.RequiresEMMI();
+    (!SupportsSSE4_1 && Loader.RequiresSSE4_1()) || (!SupportsSSE4_2 && Loader.RequiresSSE4_2()) || (!SupportsAES && Loader.RequiresAES()) ||
+    (!SupportsPCLMUL && Loader.RequiresPCLMUL()) || (!SupportsMOVBE && Loader.RequiresMOVBE()) || (!SupportsADX && Loader.RequiresADX()) ||
+    (!SupportsXSAVE && Loader.RequiresXSAVE()) || (!SupportsRDPID && Loader.RequiresRDPID()) || (!SupportsCLFLOPT && Loader.RequiresCLFLOPT()) ||
+    (!SupportsFSGSBase && Loader.RequiresFSGSBase()) || (!SupportsAVXVNNI && Loader.RequiresAVXVNNI()) || Loader.RequiresEMMI();
 #endif
 
 #ifdef _WIN32

@@ -60,6 +60,7 @@ class HostFeatures(Flag) :
     FEATURE_LRCPC2 = (1 << 15)
     FEATURE_FRINTTS = (1 << 16)
     FEATURE_MOPS   = (1 << 17)
+    FEATURE_I8MM   = (1 << 18)
 
 HostFeaturesLookup = {
     "SVE128"  : HostFeatures.FEATURE_SVE128,
@@ -80,6 +81,7 @@ HostFeaturesLookup = {
     "LRCPC2" : HostFeatures.FEATURE_LRCPC2,
     "FRINTTS" : HostFeatures.FEATURE_FRINTTS,
     "MOPS"    : HostFeatures.FEATURE_MOPS,
+    "I8MM"    : HostFeatures.FEATURE_I8MM,
 }
 
 def GetHostFeatures(data):

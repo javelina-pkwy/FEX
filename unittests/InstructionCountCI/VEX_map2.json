@@ -9,9 +9,10 @@
       "AFP",
       "FLAGM",
       "FLAGM2",
-      "SVEBITPERM"
+      "SVEBITPERM",
+      "I8MM"
     ],
-    "BinaryCacheVersion": 11
+    "BinaryCacheVersion": 12
   },
   "Instructions": {
     "vpshufb xmm0, xmm1, xmm2": {
@@ -59,8 +60,8 @@
       "ExpectedArm64ASM": [
         "movprfx z0, z17",
         "addp z0.h, p7/m, z0.h, z18.h",
-        "uzp1 z2.h, z0.h, z0.h",
         "uzp2 z1.h, z0.h, z0.h",
+        "uzp1 z2.h, z0.h, z0.h",
         "splice z2.d, p6, z2.d, z1.d",
         "ldr x0, [x28, #2552]",
         "ld1b {z3.b}, p7/z, [x0]",
@@ -84,8 +85,8 @@
       "ExpectedArm64ASM": [
         "movprfx z0, z17",
         "addp z0.s, p7/m, z0.s, z18.s",
-        "uzp1 z2.s, z0.s, z0.s",
         "uzp2 z1.s, z0.s, z0.s",
+        "uzp1 z2.s, z0.s, z0.s",
         "splice z2.d, p6, z2.d, z1.d",
         "ldr x0, [x28, #2552]",
         "ld1b {z3.b}, p7/z, [x0]",
@@ -1637,6 +1638,242 @@
         "umin z1.d, p7/m, z1.d, z18.d",
         "movprfx z16, z17",
         "lsl z16.d, p7/m, z16.d, z1.d"
+      ]
+    },
+    "vpdpbusd xmm0, xmm1, xmm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 12,
+      "Comment": [
+        "Map 2 0b01 0x50 128-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x71, 0x50, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "uxtl v2.8h, v17.8b",
+        "sxtl v3.8h, v18.8b",
+        "smull v4.4s, v2.4h, v3.4h",
+        "smull2 v2.4s, v2.8h, v3.8h",
+        "addp v2.4s, v4.4s, v2.4s",
+        "uxtl2 v3.8h, v17.16b",
+        "sxtl2 v4.8h, v18.16b",
+        "smull v5.4s, v3.4h, v4.4h",
+        "smull2 v3.4s, v3.8h, v4.8h",
+        "addp v3.4s, v5.4s, v3.4s",
+        "addp v2.4s, v2.4s, v3.4s",
+        "add v16.4s, v16.4s, v2.4s"
+      ]
+    },
+    "vpdpbusd ymm0, ymm1, ymm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 31,
+      "Comment": [
+        "Map 2 0b01 0x50 256-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x75, 0x50, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "uunpklo z2.h, z17.b",
+        "sunpklo z3.h, z18.b",
+        "smullb z0.s, z2.h, z3.h",
+        "smullt z1.s, z2.h, z3.h",
+        "zip1 z4.s, z0.s, z1.s",
+        "smullb z0.s, z2.h, z3.h",
+        "smullt z1.s, z2.h, z3.h",
+        "zip2 z2.s, z0.s, z1.s",
+        "movprfx z0, z4",
+        "addp z0.s, p7/m, z0.s, z2.s",
+        "uzp2 z1.s, z0.s, z0.s",
+        "uzp1 z2.s, z0.s, z0.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "uunpkhi z3.h, z17.b",
+        "sunpkhi z4.h, z18.b",
+        "smullb z0.s, z3.h, z4.h",
+        "smullt z1.s, z3.h, z4.h",
+        "zip1 z5.s, z0.s, z1.s",
+        "smullb z0.s, z3.h, z4.h",
+        "smullt z1.s, z3.h, z4.h",
+        "zip2 z3.s, z0.s, z1.s",
+        "movprfx z0, z5",
+        "addp z0.s, p7/m, z0.s, z3.s",
+        "uzp2 z1.s, z0.s, z0.s",
+        "uzp1 z3.s, z0.s, z0.s",
+        "splice z3.d, p6, z3.d, z1.d",
+        "addp z2.s, p7/m, z2.s, z3.s",
+        "uzp2 z1.s, z2.s, z2.s",
+        "uzp1 z2.s, z2.s, z2.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "add z16.s, z16.s, z2.s"
+      ]
+    },
+    "vpdpbusds xmm0, xmm1, xmm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 12,
+      "Comment": [
+        "Map 2 0b01 0x51 128-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x71, 0x51, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "uxtl v2.8h, v17.8b",
+        "sxtl v3.8h, v18.8b",
+        "smull v4.4s, v2.4h, v3.4h",
+        "smull2 v2.4s, v2.8h, v3.8h",
+        "addp v2.4s, v4.4s, v2.4s",
+        "uxtl2 v3.8h, v17.16b",
+        "sxtl2 v4.8h, v18.16b",
+        "smull v5.4s, v3.4h, v4.4h",
+        "smull2 v3.4s, v3.8h, v4.8h",
+        "addp v3.4s, v5.4s, v3.4s",
+        "addp v2.4s, v2.4s, v3.4s",
+        "sqadd v16.4s, v16.4s, v2.4s"
+      ]
+    },
+    "vpdpbusds ymm0, ymm1, ymm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 31,
+      "Comment": [
+        "Map 2 0b01 0x51 256-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x75, 0x51, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "uunpklo z2.h, z17.b",
+        "sunpklo z3.h, z18.b",
+        "smullb z0.s, z2.h, z3.h",
+        "smullt z1.s, z2.h, z3.h",
+        "zip1 z4.s, z0.s, z1.s",
+        "smullb z0.s, z2.h, z3.h",
+        "smullt z1.s, z2.h, z3.h",
+        "zip2 z2.s, z0.s, z1.s",
+        "movprfx z0, z4",
+        "addp z0.s, p7/m, z0.s, z2.s",
+        "uzp2 z1.s, z0.s, z0.s",
+        "uzp1 z2.s, z0.s, z0.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "uunpkhi z3.h, z17.b",
+        "sunpkhi z4.h, z18.b",
+        "smullb z0.s, z3.h, z4.h",
+        "smullt z1.s, z3.h, z4.h",
+        "zip1 z5.s, z0.s, z1.s",
+        "smullb z0.s, z3.h, z4.h",
+        "smullt z1.s, z3.h, z4.h",
+        "zip2 z3.s, z0.s, z1.s",
+        "movprfx z0, z5",
+        "addp z0.s, p7/m, z0.s, z3.s",
+        "uzp2 z1.s, z0.s, z0.s",
+        "uzp1 z3.s, z0.s, z0.s",
+        "splice z3.d, p6, z3.d, z1.d",
+        "addp z2.s, p7/m, z2.s, z3.s",
+        "uzp2 z1.s, z2.s, z2.s",
+        "uzp1 z2.s, z2.s, z2.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "sqadd z16.s, z16.s, z2.s"
+      ]
+    },
+    "vpdpwssd xmm0, xmm1, xmm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 4,
+      "Comment": [
+        "Map 2 0b01 0x52 128-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x71, 0x52, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "smull v2.4s, v17.4h, v18.4h",
+        "smull2 v3.4s, v17.8h, v18.8h",
+        "addp v2.4s, v2.4s, v3.4s",
+        "add v16.4s, v16.4s, v2.4s"
+      ]
+    },
+    "vpdpwssd ymm0, ymm1, ymm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 11,
+      "Comment": [
+        "Map 2 0b01 0x52 256-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x75, 0x52, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "smullb z0.s, z17.h, z18.h",
+        "smullt z1.s, z17.h, z18.h",
+        "zip1 z2.s, z0.s, z1.s",
+        "smullb z0.s, z17.h, z18.h",
+        "smullt z1.s, z17.h, z18.h",
+        "zip2 z3.s, z0.s, z1.s",
+        "addp z2.s, p7/m, z2.s, z3.s",
+        "uzp2 z1.s, z2.s, z2.s",
+        "uzp1 z2.s, z2.s, z2.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "add z16.s, z16.s, z2.s"
+      ]
+    },
+    "vpdpwssds xmm0, xmm1, xmm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 9,
+      "Comment": [
+        "Map 2 0b01 0x53 128-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x71, 0x53, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "smull v2.4s, v17.4h, v18.4h",
+        "smull2 v3.4s, v17.8h, v18.8h",
+        "addp v2.4s, v2.4s, v3.4s",
+        "sqadd v3.4s, v16.4s, v2.4s",
+        "neg v4.4s, v2.4s",
+        "cmeq v4.4s, v2.4s, v4.4s",
+        "sqsub v2.4s, v16.4s, v2.4s",
+        "mov v16.16b, v4.16b",
+        "bsl v16.16b, v2.16b, v3.16b"
+      ]
+    },
+    "vpdpwssds ymm0, ymm1, ymm2": {
+      "x86InstructionCount": 1,
+      "ExpectedInstructionCount": 22,
+      "Comment": [
+        "Map 2 0b01 0x53 256-bit",
+        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+      ],
+      "x86Insts": [
+        "db 0xc4, 0xe2, 0x75, 0x53, 0xc2"
+      ],
+      "ExpectedArm64ASM": [
+        "smullb z0.s, z17.h, z18.h",
+        "smullt z1.s, z17.h, z18.h",
+        "zip1 z2.s, z0.s, z1.s",
+        "smullb z0.s, z17.h, z18.h",
+        "smullt z1.s, z17.h, z18.h",
+        "zip2 z3.s, z0.s, z1.s",
+        "addp z2.s, p7/m, z2.s, z3.s",
+        "uzp2 z1.s, z2.s, z2.s",
+        "uzp1 z2.s, z2.s, z2.s",
+        "splice z2.d, p6, z2.d, z1.d",
+        "sqadd z3.s, z16.s, z2.s",
+        "neg z4.s, p7/m, z2.s",
+        "mrs x0, nzcv",
+        "cmpeq p0.s, p7/z, z2.s, z4.s",
+        "not z0.s, p0/m, z2.s",
+        "movprfx z4.s, p0/z, z2.s",
+        "orr z4.s, p0/m, z4.s, z0.s",
+        "msr nzcv, x0",
+        "sqsub z2.s, z16.s, z2.s",
+        "movprfx z0, z2",
+        "bsl z0.d, z0.d, z3.d, z4.d",
+        "mov z16.d, z0.d"
       ]
     },
     "vpbroadcastd xmm0, xmm1": {

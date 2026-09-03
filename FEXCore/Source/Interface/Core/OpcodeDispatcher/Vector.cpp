@@ -3754,6 +3754,93 @@ void OpDispatchBuilder::VPMADDUBSWOp(OpcodeArgs) {
   StoreResultFPR(Op, Result);
 }
 
+Ref OpDispatchBuilder::VPDPBUSDOpImpl(IR::OpSize Size, Ref Acc, Ref Src1, Ref Src2, bool Saturating) {
+  // Multiplies each group of four unsigned bytes in Src1 with the corresponding signed bytes in Src2,
+  // sums the four products and accumulates the result in to the 32-bit elements of Acc.
+  //
+  // x86 VPDPBUSD: xmm1, xmm2, xmm3
+  //               xmm1[31:0]  += (xmm2[7:0] * xmm3[7:0]) + (xmm2[15:8] * xmm3[15:8]) +
+  //                              (xmm2[23:16] * xmm3[23:16]) + (xmm2[31:24] * xmm3[31:24])
+  //               xmm1[63:32] += (xmm2[39:32] * xmm3[39:32]) + (xmm2[47:40] * xmm3[47:40]) +
+  //                              (xmm2[55:48] * xmm3[55:48]) + (xmm2[63:56] * xmm3[63:56])
+  //               etc.. for larger registers
+  //
+  // The sum of four products can't overflow (4 * 255 * 127 fits comfortably in 32-bits),
+  // so only the final accumulate needs to saturate for VPDPBUSDS.
+  if (CTX->HostFeatures.SupportsI8MM) {
+    if (!Saturating) {
+      return _VUSDot(Size, Acc, Src1, Src2);
+    }
+
+    auto DotProduct = _VUSDot(Size, LoadZeroVector(Size), Src1, Src2);
+    return _VSQAdd(Size, OpSize::i32Bit, Acc, DotProduct);
+  }
+
+  // Without FEAT_I8MM, widen the bytes to 16-bit and do widening multiplies to get 32-bit products.
+  // Each pairwise add then halves the number of products, so two rounds reduce the four products per element down to one.
+  auto Src1_16b_L = _VUXTL(Size, OpSize::i8Bit, Src1);
+  auto Src2_16b_L = _VSXTL(Size, OpSize::i8Bit, Src2);
+  auto ResMul_LL = _VSMull(Size, OpSize::i16Bit, Src1_16b_L, Src2_16b_L);
+  auto ResMul_LH = _VSMull2(Size, OpSize::i16Bit, Src1_16b_L, Src2_16b_L);
+  auto ResAdd_L = _VAddP(Size, OpSize::i32Bit, ResMul_LL, ResMul_LH);
+
+  auto Src1_16b_H = _VUXTL2(Size, OpSize::i8Bit, Src1);
+  auto Src2_16b_H = _VSXTL2(Size, OpSize::i8Bit, Src2);
+  auto ResMul_HL = _VSMull(Size, OpSize::i16Bit, Src1_16b_H, Src2_16b_H);
+  auto ResMul_HH = _VSMull2(Size, OpSize::i16Bit, Src1_16b_H, Src2_16b_H);
+  auto ResAdd_H = _VAddP(Size, OpSize::i32Bit, ResMul_HL, ResMul_HH);
+
+  auto DotProduct = _VAddP(Size, OpSize::i32Bit, ResAdd_L, ResAdd_H);
+  if (Saturating) {
+    return _VSQAdd(Size, OpSize::i32Bit, Acc, DotProduct);
+  }
+  return _VAdd(Size, OpSize::i32Bit, Acc, DotProduct);
+}
+
+Ref OpDispatchBuilder::VPDPWSSDOpImpl(IR::OpSize Size, Ref Acc, Ref Src1, Ref Src2, bool Saturating) {
+  // Multiplies each pair of signed words in Src1 with the corresponding words in Src2,
+  // sums the two products and accumulates the result in to the 32-bit elements of Acc.
+  // The dot product itself is exactly PMADDWD.
+  auto DotProduct = PMADDWDOpImpl(Size, Src1, Src2);
+  if (!Saturating) {
+    return _VAdd(Size, OpSize::i32Bit, Acc, DotProduct);
+  }
+
+  auto Result = _VSQAdd(Size, OpSize::i32Bit, Acc, DotProduct);
+
+  // The intermediate sum of products can only overflow in one case: (-32768 * -32768) * 2 = 2^31, which PMADDWD wraps to INT_MIN.
+  // The expected result for those elements is saturate(Acc + 2^31), which is equivalent to saturate(Acc - INT_MIN),
+  // so a saturating subtract of the wrapped dot product gives the right answer.
+  //
+  // Detect the wrapped elements by comparing the dot product against its own negation. Only INT_MIN and zero match,
+  // and for zero both the subtract and the add produce Acc, so the select is harmless there.
+  auto Overflowed = _VCMPEQ(Size, OpSize::i32Bit, DotProduct, _VNeg(Size, OpSize::i32Bit, DotProduct));
+  auto OverflowResult = _VSQSub(Size, OpSize::i32Bit, Acc, DotProduct);
+  return _VBSL(Size, Overflowed, OverflowResult, Result);
+}
+
+void OpDispatchBuilder::VPDPBUSDOp(OpcodeArgs, bool Saturating) {
+  const auto Size = OpSizeFromSrc(Op);
+
+  Ref Acc = LoadSourceFPR(Op, Op->Dest, Op->Flags);
+  Ref Src1 = LoadSourceFPR(Op, Op->Src[0], Op->Flags);
+  Ref Src2 = LoadSourceFPR(Op, Op->Src[1], Op->Flags);
+
+  Ref Result = VPDPBUSDOpImpl(Size, Acc, Src1, Src2, Saturating);
+  StoreResultFPR(Op, Result);
+}
+
+void OpDispatchBuilder::VPDPWSSDOp(OpcodeArgs, bool Saturating) {
+  const auto Size = OpSizeFromSrc(Op);
+
+  Ref Acc = LoadSourceFPR(Op, Op->Dest, Op->Flags);
+  Ref Src1 = LoadSourceFPR(Op, Op->Src[0], Op->Flags);
+  Ref Src2 = LoadSourceFPR(Op, Op->Src[1], Op->Flags);
+
+  Ref Result = VPDPWSSDOpImpl(Size, Acc, Src1, Src2, Saturating);
+  StoreResultFPR(Op, Result);
+}
+
 Ref OpDispatchBuilder::PMULHWOpImpl(OpcodeArgs, bool Signed, Ref Src1, Ref Src2) {
   const auto Size = OpSizeFromSrc(Op);
   if (Signed) {

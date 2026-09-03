@@ -1112,8 +1112,10 @@ DEF_OP(VAddP) {
     // pairwise addition, the SVE version actually interleaves the
     // results of the pairwise addition (gross!), so we need to undo that.
     addp(SubRegSize, LHS.Z(), Pred, LHS.Z(), VectorUpper.Z());
-    uzp1(SubRegSize, Dst.Z(), LHS.Z(), LHS.Z());
+
+    // Extract the upper half first, since Dst may alias LHS.
     uzp2(SubRegSize, VTMP2.Z(), LHS.Z(), LHS.Z());
+    uzp1(SubRegSize, Dst.Z(), LHS.Z(), LHS.Z());
 
     // Merge upper half with lower half.
     splice<ARMEmitter::OpType::Destructive>(ARMEmitter::SubRegSize::i64Bit, Dst.Z(), PRED_TMP_16B, Dst.Z(), VTMP2.Z());
@@ -3830,6 +3832,54 @@ DEF_OP(VMul) {
     mul(SubRegSize, Dst.Z(), Vector1.Z(), Vector2.Z());
   } else {
     mul(SubRegSize, Dst.Q(), Vector1.Q(), Vector2.Q());
+  }
+}
+
+DEF_OP(VUSDot) {
+  ///< Dest = Acc + dot(Vector1 (unsigned 8-bit), Vector2 (signed 8-bit))
+  // Matches:
+  // - SVE    - USDOT
+  // - ASIMD  - USDOT
+  const auto Op = IROp->C<IR::IROp_VUSDot>();
+  const auto OpSize = IROp->Size;
+
+  const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+
+  const auto Dst = GetVReg(Node);
+  const auto Acc = GetVReg(Op->Acc);
+  const auto Vector1 = GetVReg(Op->Vector1);
+  const auto Vector2 = GetVReg(Op->Vector2);
+
+  // USDOT accumulates in to its destination, so the accumulator needs to be moved
+  // in to place first if the register allocator couldn't tie it to the destination.
+  ARMEmitter::VRegister DestTmp = Dst;
+  if (Dst != Acc) {
+    if (Dst != Vector1 && Dst != Vector2) {
+      DestTmp = Dst;
+    } else {
+      DestTmp = VTMP1;
+    }
+  }
+
+  if (HostSupportsSVE256 && Is256Bit) {
+    if (Dst != Acc) {
+      mov(DestTmp.Z(), Acc.Z());
+    }
+
+    usdot(DestTmp.Z(), Vector1.Z(), Vector2.Z());
+    if (Dst != DestTmp) {
+      mov(Dst.Z(), DestTmp.Z());
+    }
+  } else {
+    if (Dst != Acc) {
+      mov(DestTmp.Q(), Acc.Q());
+    }
+
+    usdot(DestTmp.Q(), Vector1.Q(), Vector2.Q());
+    if (Dst != DestTmp) {
+      mov(Dst.Q(), DestTmp.Q());
+    }
   }
 }
 
