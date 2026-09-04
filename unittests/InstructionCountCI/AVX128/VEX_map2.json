@@ -2081,6 +2081,7 @@
       "ExpectedInstructionCount": 13,
       "Comment": [
         "Map 2 0b01 0x50 128-bit",
+        "vpdpbusd xmm0, xmm1, xmm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2107,6 +2108,7 @@
       "ExpectedInstructionCount": 28,
       "Comment": [
         "Map 2 0b01 0x50 256-bit",
+        "vpdpbusd ymm0, ymm1, ymm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2148,6 +2150,7 @@
       "ExpectedInstructionCount": 13,
       "Comment": [
         "Map 2 0b01 0x51 128-bit",
+        "vpdpbusds xmm0, xmm1, xmm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2174,6 +2177,7 @@
       "ExpectedInstructionCount": 28,
       "Comment": [
         "Map 2 0b01 0x51 256-bit",
+        "vpdpbusds ymm0, ymm1, ymm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2215,6 +2219,7 @@
       "ExpectedInstructionCount": 5,
       "Comment": [
         "Map 2 0b01 0x52 128-bit",
+        "vpdpwssd xmm0, xmm1, xmm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2233,6 +2238,7 @@
       "ExpectedInstructionCount": 12,
       "Comment": [
         "Map 2 0b01 0x52 256-bit",
+        "vpdpwssd ymm0, ymm1, ymm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2258,6 +2264,7 @@
       "ExpectedInstructionCount": 10,
       "Comment": [
         "Map 2 0b01 0x53 128-bit",
+        "vpdpwssds xmm0, xmm1, xmm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
@@ -2281,6 +2288,7 @@
       "ExpectedInstructionCount": 21,
       "Comment": [
         "Map 2 0b01 0x53 256-bit",
+        "vpdpwssds ymm0, ymm1, ymm2",
         "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
