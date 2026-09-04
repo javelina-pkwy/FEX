@@ -665,7 +665,8 @@ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_07h(uint32_t Leaf) const {
     const uint32_t SupportsWFXT = CTX->HostFeatures.SupportsWFXT;
 
     // Number of subfunctions
-    Res.eax = 0x1;
+    // Subfunction 1 only exposes AVX-VNNI, so it only exists when AVX does.
+    Res.eax = SupportsAVX();
     Res.ebx = (1 << 0) |                               // FS/GS support
               (0 << 1) |                               // TSC adjust MSR
               (0 << 2) |                               // SGX
