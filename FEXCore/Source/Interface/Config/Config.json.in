@@ -119,7 +119,7 @@
           "\t{enable,disable}3dnow: Will force enable or disable 3DNow! even if the host doesn't support it",
           "\t{enable,disable}sse4a: Will force enable or disable SSE4a even if the host doesn't support it",
           "\t{enable,disable}mops: Will force enable or disable FEAT_MOPS even if the host doesn't support it",
-          "\t{enable,disable}i8mm: Will force enable or disable FEAT_I8MM even if the host doesn't support it"
+          "\t{enable,disable}i8mm: Will force enable or disable i8mm even if the host doesn't support it"
         ]
       },
       "SmallTSCScale": {

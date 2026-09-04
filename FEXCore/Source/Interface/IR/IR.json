@@ -2357,9 +2357,8 @@
         "ElementSize": "ElementSize << 1"
       },
       "FPR = VUSDot OpSize:#RegisterSize, FPR:$Acc, FPR:$Vector1, FPR:$Vector2": {
-        "Desc": ["Multiplies each group of four unsigned 8-bit elements in Vector1 with the corresponding signed 8-bit elements in Vector2,",
-                 "sums the four products and accumulates the result in to the 32-bit elements of Acc.",
-                 "Requires FEAT_I8MM on the host."
+        "Desc": ["Unsigned by signed 8-bit dot product, accumulating four products in to each 32-bit element of Acc.",
+                 "Requires FEAT_I8MM."
                 ],
         "DestSize": "RegisterSize",
         "ElementSize": "OpSize::i32Bit",

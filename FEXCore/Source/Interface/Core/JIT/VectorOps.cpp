@@ -3851,8 +3851,7 @@ DEF_OP(VUSDot) {
   const auto Vector1 = GetVReg(Op->Vector1);
   const auto Vector2 = GetVReg(Op->Vector2);
 
-  // USDOT accumulates in to its destination, so the accumulator needs to be moved
-  // in to place first if the register allocator couldn't tie it to the destination.
+  // USDOT is destructive, move the accumulator in to place if RA couldn't tie it.
   ARMEmitter::VRegister DestTmp = Dst;
   if (Dst != Acc) {
     if (Dst != Vector1 && Dst != Vector2) {

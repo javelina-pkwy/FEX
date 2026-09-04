@@ -2081,7 +2081,7 @@
       "ExpectedInstructionCount": 13,
       "Comment": [
         "Map 2 0b01 0x50 128-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x71, 0x50, 0xc2"
@@ -2107,7 +2107,7 @@
       "ExpectedInstructionCount": 28,
       "Comment": [
         "Map 2 0b01 0x50 256-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x75, 0x50, 0xc2"
@@ -2148,7 +2148,7 @@
       "ExpectedInstructionCount": 13,
       "Comment": [
         "Map 2 0b01 0x51 128-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x71, 0x51, 0xc2"
@@ -2174,7 +2174,7 @@
       "ExpectedInstructionCount": 28,
       "Comment": [
         "Map 2 0b01 0x51 256-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x75, 0x51, 0xc2"
@@ -2215,7 +2215,7 @@
       "ExpectedInstructionCount": 5,
       "Comment": [
         "Map 2 0b01 0x52 128-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x71, 0x52, 0xc2"
@@ -2233,7 +2233,7 @@
       "ExpectedInstructionCount": 12,
       "Comment": [
         "Map 2 0b01 0x52 256-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x75, 0x52, 0xc2"
@@ -2258,7 +2258,7 @@
       "ExpectedInstructionCount": 10,
       "Comment": [
         "Map 2 0b01 0x53 128-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x71, 0x53, 0xc2"
@@ -2281,7 +2281,7 @@
       "ExpectedInstructionCount": 21,
       "Comment": [
         "Map 2 0b01 0x53 256-bit",
-        "NASM 2.16 only emits the EVEX (AVX512-VNNI) encoding for this mnemonic, so encode the VEX form by hand"
+        "NASM only emits the EVEX encoding, hand encode the VEX form"
       ],
       "x86Insts": [
         "db 0xc4, 0xe2, 0x75, 0x53, 0xc2"
