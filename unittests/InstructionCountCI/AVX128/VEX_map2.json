@@ -10,7 +10,7 @@
       "SVE256",
       "I8MM"
     ],
-    "BinaryCacheVersion": 12
+    "BinaryCacheVersion": 11
   },
   "Instructions": {
     "vpshufb xmm0, xmm1, xmm2": {
