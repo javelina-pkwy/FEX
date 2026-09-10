@@ -286,7 +286,7 @@
       "DynamicL1Cache": {
         "Type": "bool",
         "Default": "false",
-        "AffectsCodeGen": "false",
+        "AffectsCodeGen": "true",
         "Desc": [
           "Switches FEXCore's JIT L1 cache to be dynamically sized. Saving memory.",
           "Can potentially introduce more stutters.",
@@ -297,6 +297,7 @@
       "PinL1Pointer": {
         "Type": "bool",
         "Default": "true",
+        "AffectsCodeGen": "true",
         "Desc": [
           "Pins the JIT L1 cache base pointer in a dedicated host register, letting the L1 lookup",
           "be done in two instructions instead of five.",
