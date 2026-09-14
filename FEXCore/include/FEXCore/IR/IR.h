@@ -60,6 +60,7 @@ enum NamedVectorConstant : uint8_t {
   NAMED_VECTOR_SHA1RNDS_K1,
   NAMED_VECTOR_SHA1RNDS_K2,
   NAMED_VECTOR_SHA1RNDS_K3,
+  NAMED_VECTOR_INCREMENTAL_U8_INDEX,
 
   NAMED_VECTOR_CONST_POOL_MAX,
   // Beginning of named constants that don't have a constant pool backing.

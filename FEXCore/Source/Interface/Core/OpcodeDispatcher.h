@@ -1388,7 +1388,25 @@ private:
   Ref PALIGNROpImpl(OpcodeArgs, const X86Tables::DecodedOperand& Src1, const X86Tables::DecodedOperand& Src2,
                     const X86Tables::DecodedOperand& Imm, bool IsAVX);
 
+  // Element layout of a PCMPXSTRX instruction, shared by its helpers.
+  struct PCMPXSTRXLayout {
+    IR::OpSize ElementSize;
+    uint32_t NumElements;
+    Ref Indices;        // [0, 1, 2, ...]
+    Ref VecNumElements; // NumElements in each element
+  };
   void PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask, bool IsAVX);
+  Ref PCMPXSTRXExplicitLength(uint32_t GPR, bool Is64Bit, uint32_t NumElements);
+  Ref PCMPXSTRXImplicitLength(const PCMPXSTRXLayout& Layout, Ref Vector);
+  Ref PCMPXSTRXValidMask(const PCMPXSTRXLayout& Layout, Ref LengthVector);
+  Ref PCMPXSTRXEqualAny(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXRanges(const PCMPXSTRXLayout& Layout, bool IsSigned, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXEqualEach(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXEqualOrdered(const PCMPXSTRXLayout& Layout, bool IsExplicit, Ref Src1, Ref Src2, Ref LenL, Ref LenR, Ref LenRVector);
+  Ref PCMPXSTRXLowestIndex(const PCMPXSTRXLayout& Layout, Ref Matches);
+  Ref PCMPXSTRXHighestIndex(const PCMPXSTRXLayout& Layout, Ref Matches, Ref Lowest);
+  Ref PCMPXSTRXBitMask(const PCMPXSTRXLayout& Layout, Ref Matches);
+  Ref PCMPXSTRXFlags(uint32_t NumElements, Ref LenL, Ref LenR, Ref Lowest);
 
   Ref PHADDSOpImpl(OpSize Size, Ref Src1, Ref Src2);
 

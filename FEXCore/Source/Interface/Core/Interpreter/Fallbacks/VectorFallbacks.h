@@ -11,6 +11,8 @@
 #include "Interface/IR/IR.h"
 #include "Common/VectorRegType.h"
 
+// NOTE: Currently unused. The OpcodeDispatcher implements the SSE4.2 string
+//       instructions inline and no longer emits VPCMPESTRX/VPCMPISTRX.
 namespace FEXCore::CPU {
 
 template<>
