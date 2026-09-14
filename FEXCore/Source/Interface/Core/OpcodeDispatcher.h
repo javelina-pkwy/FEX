@@ -1388,7 +1388,18 @@ private:
   Ref PALIGNROpImpl(OpcodeArgs, const X86Tables::DecodedOperand& Src1, const X86Tables::DecodedOperand& Src2,
                     const X86Tables::DecodedOperand& Imm, bool IsAVX);
 
+  struct PCMPXSTRXLayout {
+    IR::OpSize ElementSize;
+    uint32_t NumElements;
+    Ref Indices;
+  };
+
   void PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask, bool IsAVX);
+  Ref PCMPXSTRXExplicitLength(uint32_t GPR, IR::OpSize Size, uint32_t NumElements);
+  Ref PCMPXSTRXEqualAny(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXRanges(const PCMPXSTRXLayout& Layout, bool IsSigned, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXEqualEach(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXEqualOrdered(const PCMPXSTRXLayout& Layout, bool IsExplicit, Ref Src1, Ref Src2, Ref LenL, Ref LenR, Ref LenRVector);
 
   Ref PHADDSOpImpl(OpSize Size, Ref Src1, Ref Src2);
 

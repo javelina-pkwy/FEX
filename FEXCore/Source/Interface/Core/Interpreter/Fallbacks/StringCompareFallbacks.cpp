@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// NOTE: Currently unused, see VectorFallbacks.h.
 #include "Interface/Core/Interpreter/Fallbacks/VectorFallbacks.h"
 #include "Interface/IR/IR.h"
 
