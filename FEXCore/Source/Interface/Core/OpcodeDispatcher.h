@@ -1392,6 +1392,11 @@ private:
                     const X86Tables::DecodedOperand& Imm, bool IsAVX);
 
   void PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask, bool IsAVX);
+  Ref PCMPXSTRXExplicitLength(IR::OpSize ElementSize, IR::OpSize GPRSize, uint32_t GPR, Ref* Invalid, Ref* PlusOne = nullptr);
+  Ref PCMPXSTRXEqualAny(IR::OpSize ElementSize, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXRanges(IR::OpSize ElementSize, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR, bool IsSigned);
+  Ref PCMPXSTRXEqualEach(IR::OpSize ElementSize, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR);
+  Ref PCMPXSTRXEqualOrdered(IR::OpSize ElementSize, Ref Src1, Ref Src2, Ref LenL, Ref LenR, Ref LenRPlusOne, Ref Indices, bool IsExplicit);
 
   Ref PHADDSOpImpl(OpSize Size, Ref Src1, Ref Src2);
 

@@ -3165,6 +3165,31 @@ DEF_OP(VExtr) {
   }
 }
 
+DEF_OP(VSli) {
+  const auto Op = IROp->C<IR::IROp_VSli>();
+  const auto OpSize = IROp->Size;
+  const auto SubRegSize = ConvertSubRegSize8(IROp);
+  LOGMAN_THROW_A_FMT(OpSize != IR::OpSize::i256Bit, "256-bit {} is unsupported", __func__);
+  LOGMAN_THROW_A_FMT(Op->BitShift < IR::OpSizeAsBits(Op->Header.ElementSize), "{} shift is out of range", __func__);
+
+  const auto Dst = GetVReg(Node);
+  const auto Dest = GetVReg(Op->Dest);
+  const auto Vector = GetVReg(Op->Vector);
+
+  // SLI inserts in to its destination register, so move Dest there first if RA didn't tie them.
+  auto DestTmp = Dst;
+  if (Dst != Dest) {
+    DestTmp = Dst != Vector ? Dst : VTMP1;
+    mov(DestTmp.Q(), Dest.Q());
+  }
+
+  sli(SubRegSize, DestTmp.Q(), Vector.Q(), Op->BitShift);
+
+  if (Dst != DestTmp) {
+    mov(Dst.Q(), DestTmp.Q());
+  }
+}
+
 DEF_OP(VUShrI) {
   const auto Op = IROp->C<IR::IROp_VUShrI>();
   const auto OpSize = IROp->Size;

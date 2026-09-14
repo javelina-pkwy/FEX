@@ -2016,6 +2016,18 @@
           "BitShift > 0"
         ]
       },
+      "FPR = VSli OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Dest, FPR:$Vector, u8:$BitShift": {
+        "Desc": ["Shift left and insert.",
+                 "Shifts each element left by BitShift and inserts the shifted bits into the upper bits of the destination elements"
+                ],
+        "TiedSource": 0,
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "EmitValidation": [
+          "ElementSize >= FEXCore::IR::OpSize::i8Bit && ElementSize <= FEXCore::IR::OpSize::i64Bit",
+          "BitShift > 0"
+        ]
+      },
       "FPR = VUShrI OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Vector, u8:$BitShift": {
         "TiedSource": 0,
         "DestSize": "RegisterSize",
@@ -2585,7 +2597,8 @@
       },
 
       "GPR = VPCMPESTRX FPR:$LHS, FPR:$RHS, GPR:$RAX, GPR:$RDX, u16:$Control": {
-        "Desc": ["Performs intermediate behavior analogous to the x86 PCMPESTRI/PCMPESTRM instruction",
+        "Desc": ["NOTE: Currently unused. The OpcodeDispatcher implements the SSE4.2 string instructions inline.",
+                 "Performs intermediate behavior analogous to the x86 PCMPESTRI/PCMPESTRM instruction",
                  "This will return the intermediate result of a PCMPESTR-type operation, but NOT the final",
                  "result. This must be derived from the intermediate result",
 
@@ -2597,7 +2610,8 @@
         "JITDispatch": false
       },
       "GPR = VPCMPISTRX FPR:$LHS, FPR:$RHS, u8:$Control": {
-        "Desc": ["Performs intermediate behavior analogous to the x86 PCMPISTRI/PCMPISTRM instruction",
+        "Desc": ["NOTE: Currently unused. The OpcodeDispatcher implements the SSE4.2 string instructions inline.",
+                 "Performs intermediate behavior analogous to the x86 PCMPISTRI/PCMPISTRM instruction",
                  "This will return the intermediate result of a PCMPISTR-type operation, but NOT the final",
                  "result. This must be derived from the intermediate result",
 
