@@ -279,7 +279,7 @@ void Dispatcher::EmitDispatcher() {
     constexpr size_t InterruptPageOffset =
       offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
 
-      static_assert(InterruptPageOffset <= 32760, "InterruptFaultPage is out of range");
+    static_assert(InterruptPageOffset <= 32760, "InterruptFaultPage is out of range");
     str(ARMEmitter::XReg::zr, STATE, InterruptPageOffset);
 #endif
   };

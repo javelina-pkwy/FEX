@@ -8,6 +8,7 @@ $end_info$
 
 #include "Interface/Context/Context.h"
 #include "Interface/Core/OpcodeDispatcher.h"
+#include "Interface/Core/Interpreter/Fallbacks/VectorFallbacks.h"
 #include "Interface/Core/X86Tables/X86Tables.h"
 #include "Interface/IR/IR.h"
 
@@ -5608,9 +5609,9 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   Ref Src1 = LoadSourceFPR_WithOpSize(Op, Op->Dest, OpSize::i128Bit, Op->Flags);
   Ref Src2 = LoadSourceFPR_WithOpSize(Op, Op->Src[0], OpSize::i128Bit, Op->Flags, {.Align = OpSize::i8Bit});
 
-  // control[0] selects 16-bit elements and control[1] signed elements.
-  const bool IsWords = (Control & 1) != 0;
-  const bool IsSigned = (Control & 2) != 0;
+  const auto Format = static_cast<CPU::SourceData>(Control & 0b11);
+  const bool IsWords = Format == CPU::SourceData::U16 || Format == CPU::SourceData::S16;
+  const bool IsSigned = Format == CPU::SourceData::S8 || Format == CPU::SourceData::S16;
   const auto ElementSize = IsWords ? OpSize::i16Bit : OpSize::i8Bit;
   const uint32_t NumElements = 16U >> (Control & 1);
   const PCMPXSTRXLayout Layout {
@@ -5623,11 +5624,11 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   // control[3:2] selects the aggregation and control[5:4] the polarity.
   // Equal ordered works from the lengths (broadcast RHS length included with implicit lengths)
   // and only needs the RHS mask for negative masked polarity.
-  const auto Aggregation = (Control >> 2) & 0b11;
-  const auto Polarity = (Control >> 4) & 0b11;
-  const bool IsEqualOrdered = Aggregation == 0b11;
+  const auto Aggregation = static_cast<CPU::AggregationOp>((Control >> 2) & 0b11);
+  const auto Polarity = static_cast<CPU::Polarity>((Control >> 4) & 0b11);
+  const bool IsEqualOrdered = Aggregation == CPU::AggregationOp::EqualOrdered;
   const bool NeedsValidL = !IsEqualOrdered;
-  const bool NeedsValidR = !IsEqualOrdered || Polarity == 0b11;
+  const bool NeedsValidR = !IsEqualOrdered || Polarity == CPU::Polarity::NegativeMasked;
   const bool NeedsLenRVector = NeedsValidR || !IsExplicit;
 
   // Number of valid elements in each source, clamped to [0, NumElements], as a GPR
@@ -5668,16 +5669,16 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   // (See 4.1.5 Aggregation Operation and 4.1.6 Valid/Invalid Override of Comparisons in the Intel Software Development Manual)
   Ref Matches {};
   switch (Aggregation) {
-  case 0b00: Matches = PCMPXSTRXEqualAny(Layout, Src1, Src2, ValidL, ValidR); break;
-  case 0b01: Matches = PCMPXSTRXRanges(Layout, IsSigned, Src1, Src2, ValidL, ValidR); break;
-  case 0b10: Matches = PCMPXSTRXEqualEach(Layout, Src1, Src2, ValidL, ValidR); break;
-  case 0b11: Matches = PCMPXSTRXEqualOrdered(Layout, IsExplicit, Src1, Src2, LenL, LenR, LenRVector); break;
+  case CPU::AggregationOp::EqualAny: Matches = PCMPXSTRXEqualAny(Layout, Src1, Src2, ValidL, ValidR); break;
+  case CPU::AggregationOp::Ranges: Matches = PCMPXSTRXRanges(Layout, IsSigned, Src1, Src2, ValidL, ValidR); break;
+  case CPU::AggregationOp::EqualEach: Matches = PCMPXSTRXEqualEach(Layout, Src1, Src2, ValidL, ValidR); break;
+  case CPU::AggregationOp::EqualOrdered: Matches = PCMPXSTRXEqualOrdered(Layout, IsExplicit, Src1, Src2, LenL, LenR, LenRVector); break;
   }
 
   // Negative polarity inverts everything, negative masked polarity only the valid RHS elements.
-  if (Polarity == 0b01) {
+  if (Polarity == CPU::Polarity::Negative) {
     Matches = _VNot(OpSize::i128Bit, Matches);
-  } else if (Polarity == 0b11) {
+  } else if (Polarity == CPU::Polarity::NegativeMasked) {
     Matches = _VXor(OpSize::i128Bit, Matches, ValidR);
   }
 
