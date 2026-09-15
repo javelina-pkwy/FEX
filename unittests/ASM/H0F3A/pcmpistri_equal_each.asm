@@ -2,9 +2,11 @@
 {
   "RegData": {
       "XMM0": ["0x07000F060E060F00", "0x0000000007040404"],
-      "XMM1": ["0x3939191919193939", "0x0000000019191919"],
-      "XMM2": ["0x306F8A9E672C65E5", "0x000030443057697D"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3"]
+      "XMM1": ["0x3939191919193939", "0x3939212119191919"],
+      "XMM2": ["0xDDEE007964776F48", "0x5566778899AABBCC"],
+      "XMM3": ["0x4546207964776F48", "0x212121736E616958"],
+      "XMM4": ["0x0000000000000010", "0x0000000000000000"],
+      "XMM5": ["0x0000000000003110", "0x0000000000000000"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -109,9 +111,38 @@ CompareAndStore 10, 0b00111001
 ; Unsigned word string check (msb, negative masked)
 CompareAndStore 11, 0b01111001
 
+movaps xmm2, [rel .data_howdy]
+movaps xmm3, [rel .data_howdy]
+; Unsigned byte string check (lsb, positive masked)
+CompareAndStore 12, 0b00101000
+
+movaps xmm3, [rel .data_howdy_alt]
+; Signed byte string check (lsb, positive polarity)
+CompareAndStore 13, 0b00001010
+
+movaps xmm2, [rel .data16_japanese]
+movaps xmm3, [rel .data16_japanese]
+; Identical word strings
+CompareAndStore 14, 0b00001001
+
+movaps xmm2, [rel .data_empty]
+movaps xmm3, [rel .data_empty]
+; Both strings empty (lsb)
+CompareAndStore 15, 0b00001000
+
+movaps xmm3, [rel .data_howdy]
+; Empty string against a full string
+CompareAndStore 16, 0b00001000
+
+movaps xmm2, [rel .data_howdy_short]
+; Short string against a full string (lsb)
+CompareAndStore 17, 0b00001000
+
 ; Load all our stored indices and flags for result comparing
 movaps xmm0, [rel .indices]
+movaps xmm4, [rel .indices + 16]
 movaps xmm1, [rel .flags]
+movaps xmm5, [rel .flags + 16]
 
 hlt
 
@@ -137,6 +168,26 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_howdy:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
+
+.data_howdy_alt:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x3F2121736E616958 ; "Xians!!?"
+
+.data16_japanese:
+dq 0x306F8A9E672C65E5 ; "日本語は"
+dq 0x00003044305796E3 ; "難しい\0"
+
+.data_empty:
+dq 0x8899AABBCCDDEE00 ; "\0" (followed by junk)
+dq 0xF011223344556677
+
+.data_howdy_short:
+dq 0xDDEE007964776F48 ; "Howdy\0" (followed by junk)
+dq 0x5566778899AABBCC
 
 .indices:
 dq 0x0000000000000000

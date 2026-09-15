@@ -2,12 +2,12 @@
 {
   "HostFeatures": ["AVX"],
   "RegData": {
-      "RAX": ["4"],
-      "RDX": ["16"],
-      "XMM0": ["0x00060F000F000D01", "0x0000000000070007", "0x0000000000000000", "0x0000000000000000"],
-      "XMM1": ["0x3111313131311111", "0x0000000000313131", "0x0000000000000000", "0x0000000000000000"],
-      "XMM2": ["0x005A0041007A0061", "0x55AACCBBFF223344", "0xAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBB"],
-      "XMM3": ["0x006500200027003F", "0x00210065004F0065", "0x8888888888888888", "0x9999999999999999"]
+      "RAX": ["2"],
+      "RDX": ["7"],
+      "XMM0": ["0x00060F000F000D01", "0x0000040404070007", "0x0000000000000000", "0x0000000000000000"],
+      "XMM1": ["0x3111313131311111", "0x0039191111313131", "0x0000000000000000", "0x0000000000000000"],
+      "XMM2": ["0xAABBCCDDEE0002FE", "0x2233445566778899", "0x0000000000000000", "0x0000000000000000"],
+      "XMM3": ["0x004103FFFD807F01", "0x778899AABBCCDDEE", "0x0000000000000000", "0x0000000000000000"]
   }
 }
 %endif
@@ -113,6 +113,28 @@ CompareAndStore 9, 0b00110101
 ; Range unsigned word check (msb, negative masked)
 CompareAndStore 10, 0b01110101
 
+vmovaps xmm2, [rel .data_azA]
+vmovaps xmm3, [rel .data_abc_xyz]
+mov rax, 3
+mov rdx, 16
+; Odd range length
+CompareAndStore 11, 0b00000100
+
+mov rax, 4
+; Range with a null upper bound
+CompareAndStore 12, 0b00000100
+
+mov rax, 2
+mov rdx, -7
+; Negative string length
+CompareAndStore 13, 0b00000100
+
+vmovaps xmm2, [rel .data_range_s8]
+vmovaps xmm3, [rel .data_range_s8_str]
+mov rdx, 7
+; Signed byte range check (lsb, positive polarity)
+CompareAndStore 14, 0b00000110
+
 ; Load all our stored indices and flags for result comparing
 vmovaps ymm0, [rel .indices]
 vmovaps ymm1, [rel .flags]
@@ -141,6 +163,22 @@ dq 0x006500200027003F ; "?' e"
 dq 0x00210065004F0065 ; "eOen!"
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_azA:
+dq 0xBBCCDDEE00417A61 ; "azA\0" (followed by junk)
+dq 0x33445566778899AA
+
+.data_abc_xyz:
+dq 0x007A797820434241 ; "ABC xyz\0"
+dq 0x778899AABBCCDDEE
+
+.data_range_s8:
+dq 0xAABBCCDDEE0002FE ; "\xfe\x02\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_range_s8_str:
+dq 0x004103FFFD807F01 ; "\x01\x7f\x80\xfd\xff\x03A\0"
+dq 0x778899AABBCCDDEE
 
 .indices:
 dq 0x0000000000000000

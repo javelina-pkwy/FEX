@@ -1,12 +1,14 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "RAX": ["2"],
+      "RAX": ["0x100000002"],
       "RDX": ["16"],
-      "XMM0": ["0x05050F000F000902", "0x0000000007000700"],
-      "XMM1": ["0x1111313131311111", "0x0000000031313131"],
-      "XMM2": ["0x306F8A9E30443057", "0x000030443057697D"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3"]
+      "XMM0": ["0x05050F000F000902", "0x0002100207000700"],
+      "XMM1": ["0x1111313131311111", "0x3119181131313131"],
+      "XMM2": ["0x99AABBCCDDEE0077", "0x1122334455667788"],
+      "XMM3": ["0x4546207900776F48", "0x212121736E616958"],
+      "XMM4": ["0x0000000000100202", "0x0000000000000000"],
+      "XMM5": ["0x0000000000001111", "0x0000000000000000"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -115,9 +117,46 @@ CompareAndStore 10, 0b00111101
 ; Unsigned word string check (msb, negative masked)
 CompareAndStore 11, 0b01111101
 
+movaps xmm2, [rel .data_w]
+movaps xmm3, [rel .data_howdy_null]
+mov rax, 2
+mov rdx, 16
+; Null character inside both lengths (lsb)
+CompareAndStore 12, 0b00001100
+
+mov rdx, 3
+; Needle running past the string length
+CompareAndStore 13, 0b00001100
+
+mov rdx, 4
+; Needle ending exactly at the string length
+CompareAndStore 14, 0b00001100
+
+mov rax, 0
+mov rdx, 16
+; Zero length needle
+CompareAndStore 15, 0b00001100
+
+mov rax, -2
+; Negative length
+CompareAndStore 16, 0b00001100
+
+mov rax, 0x100000002
+; Upper 32 bits of RAX ignored without REX.W
+CompareAndStore 17, 0b00001100
+
+; REX.W uses all 64 bits of RAX
+db 0x66, 0x48, 0x0F, 0x3A, 0x61, 0xD3, 0b00001100 ; REX.W pcmpestri xmm2, xmm3
+mov [rel .indices + 18], cl
+mov r15, rax
+ArrangeAndStoreFLAGS 18
+mov rax, r15
+
 ; Load all our stored indices and flags for result comparing
 movaps xmm0, [rel .indices]
+movaps xmm4, [rel .indices + 16]
 movaps xmm1, [rel .flags]
+movaps xmm5, [rel .flags + 16]
 
 hlt
 
@@ -143,6 +182,14 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_w:
+dq 0x99AABBCCDDEE0077 ; "w\0" (followed by junk)
+dq 0x1122334455667788
+
+.data_howdy_null:
+dq 0x4546207900776F48 ; "How\0y FE"
+dq 0x212121736E616958 ; "Xians!!!"
 
 .indices:
 dq 0x0000000000000000

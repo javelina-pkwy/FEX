@@ -2,12 +2,12 @@
 {
   "HostFeatures": ["AVX"],
   "RegData": {
-      "RAX": ["15"],
-      "RDX": ["16"],
-      "XMM0": ["0x04070F000F000E05", "0x0000000000040404", "0x0000000000000000", "0x0000000000000000"],
-      "XMM1": ["0x0121313131311111", "0x0000000000010101", "0x0000000000000000", "0x0000000000000000"],
-      "XMM2": ["0x306F8A9E672C65E5", "0x000030443057697D", "0xAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBB"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3", "0x8888888888888888", "0x9999999999999999"]
+      "RAX": ["2"],
+      "RDX": ["0"],
+      "XMM0": ["0x04070F000F000E05", "0x0010100101040404", "0x0000000000000000", "0x0000000000000000"],
+      "XMM1": ["0x0121313131311111", "0x0018181919010101", "0x0000000000000000", "0x0000000000000000"],
+      "XMM2": ["0x99AABBCCDDEE6100", "0x1122334455667788", "0x0000000000000000", "0x0000000000000000"],
+      "XMM3": ["0xCCDDEE0062006178", "0x445566778899AABB", "0x0000000000000000", "0x0000000000000000"]
   }
 }
 %endif
@@ -112,6 +112,26 @@ CompareAndStore 9, 0b00110001
 ; Unsigned word character check (msb, negative masked)
 CompareAndStore 10, 0b01110001
 
+vmovaps xmm2, [rel .data_null_a]
+vmovaps xmm3, [rel .data_xa]
+mov rax, 2
+mov rdx, 5
+; Null character in the set (lsb)
+CompareAndStore 11, 0b00000000
+
+mov rax, -2
+; Negative set length
+CompareAndStore 12, 0b00000000
+
+mov rax, 0
+; Zero set length
+CompareAndStore 13, 0b00000000
+
+mov rax, 2
+mov rdx, 0
+; Zero string length
+CompareAndStore 14, 0b00000000
+
 ; Load all our stored indices and flags for result comparing
 vmovaps ymm0, [rel .indices]
 vmovaps ymm1, [rel .flags]
@@ -140,6 +160,14 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_null_a:
+dq 0x99AABBCCDDEE6100 ; "\0a" (followed by junk)
+dq 0x1122334455667788
+
+.data_xa:
+dq 0xCCDDEE0062006178 ; "xa\0b\0" (followed by junk)
+dq 0x445566778899AABB
 
 .indices:
 dq 0x0000000000000000

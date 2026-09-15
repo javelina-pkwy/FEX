@@ -1,11 +1,11 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "RAX":   ["15"],
-      "RDX":   ["16"],
-      "XMM1":  ["0x0121313131311111", "0x0000000000010101"],
-      "XMM2":  ["0x306F8A9E672C65E5", "0x000030443057697D"],
-      "XMM3":  ["0x306F8A9E672C65E5", "0x00003044305796E3"],
+      "RAX":   ["2"],
+      "RDX":   ["5"],
+      "XMM1":  ["0x0121313131311111", "0x0000000019010101"],
+      "XMM2":  ["0x99AABBCCDDEE6100", "0x1122334455667788"],
+      "XMM3":  ["0xCCDDEE0062006178", "0x445566778899AABB"],
       "XMM4":  ["0x00000000000060A0", "0x0000000000000000"],
       "XMM5":  ["0xFF00FF0000000000", "0x00FFFF0000000000"],
       "XMM6":  ["0x0000000000009F5F", "0x0000000000000000"],
@@ -16,7 +16,8 @@
       "XMM11": ["0x0000000000000010", "0x0000000000000000"],
       "XMM12": ["0x0000000000000000", "0x000000000000FFFF"],
       "XMM13": ["0x0000000000000010", "0x0000000000000000"],
-      "XMM14": ["0x0000000000000000", "0x000000000000FFFF"]
+      "XMM14": ["0x0000000000000000", "0x000000000000FFFF"],
+      "XMM15": ["0x0000000000000016", "0x0000000000000000"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -123,6 +124,15 @@ CompareAndStore 9, 0b00110001, 13
 CompareAndStore 10, 0b01110001, 14
 
 ; Load all our stored flags for result comparing
+
+movaps xmm2, [rel .data_null_a]
+movaps xmm3, [rel .data_xa]
+mov rax, 2
+mov rdx, 5
+; Null character in the set (lsb)
+CompareAndStore 11, 0b00000000, 15
+
+; Load all our stored indices and flags for result comparing
 movaps xmm1, [rel .flags]
 
 hlt
@@ -149,6 +159,14 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_null_a:
+dq 0x99AABBCCDDEE6100 ; "\0a" (followed by junk)
+dq 0x1122334455667788
+
+.data_xa:
+dq 0xCCDDEE0062006178 ; "xa\0b\0" (followed by junk)
+dq 0x445566778899AABB
 
 .flags:
 dq 0x0000000000000000

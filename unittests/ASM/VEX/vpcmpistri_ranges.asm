@@ -2,10 +2,10 @@
 {
   "HostFeatures": ["AVX"],
   "RegData": {
-      "XMM0": ["0x00060F000F000D01", "0x0000000000070007", "0x0000000000000000", "0x0000000000000000"],
-      "XMM1": ["0x3111313131311111", "0x0000000000313131", "0x0000000000000000", "0x0000000000000000"],
-      "XMM2": ["0x005A0041007A0061", "0x55AACCBBFF220000", "0xAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBB"],
-      "XMM3": ["0x006500200027003F", "0x00210065004F0065", "0x8888888888888888", "0x9999999999999999"]
+      "XMM0": ["0x00060F000F000D01", "0x0800041000070007", "0x0000000000000403", "0x0000000000000000"],
+      "XMM1": ["0x3111313131311111", "0x1839391839313131", "0x0000000000001919", "0x0000000000000000"],
+      "XMM2": ["0xBBCCDDEE00417A61", "0x33445566778899AA", "0x0000000000000000", "0x0000000000000000"],
+      "XMM3": ["0x007A797820434241", "0x778899AABBCCDDEE", "0x0000000000000000", "0x0000000000000000"]
   }
 }
 %endif
@@ -105,6 +105,35 @@ CompareAndStore 9, 0b00110101
 ; Range unsigned word check (msb, negative masked)
 CompareAndStore 10, 0b01110101
 
+vmovaps xmm2, [rel .data_range_s8]
+vmovaps xmm3, [rel .data_range_s8_str]
+; Signed byte range check (lsb, positive polarity)
+CompareAndStore 11, 0b00000110
+
+; Same range as unsigned bytes (empty range)
+CompareAndStore 12, 0b00000100
+
+; Signed byte range check (msb, positive polarity)
+CompareAndStore 13, 0b01000110
+
+vmovaps xmm2, [rel .data16_range_s16]
+vmovaps xmm3, [rel .data16_range_values]
+; Signed word range check (lsb, positive polarity)
+CompareAndStore 14, 0b00000111
+
+; Unsigned word range check (lsb, positive polarity)
+CompareAndStore 15, 0b00000101
+
+vmovaps xmm2, [rel .data_range_ff]
+vmovaps xmm3, [rel .data_ff_str]
+; Single character range (msb)
+CompareAndStore 16, 0b01000100
+
+vmovaps xmm2, [rel .data_azA]
+vmovaps xmm3, [rel .data_abc_xyz]
+; Odd number of range characters
+CompareAndStore 17, 0b00000100
+
 ; Load all our stored indices and flags for result comparing
 vmovaps ymm0, [rel .indices]
 vmovaps ymm1, [rel .flags]
@@ -133,6 +162,38 @@ dq 0x006500200027003F ; "?' e"
 dq 0x00210065004F0065 ; "eOen!"
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_range_s8:
+dq 0xAABBCCDDEE0002FE ; "\xfe\x02\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_range_s8_str:
+dq 0x004103FFFD807F01 ; "\x01\x7f\x80\xfd\xff\x03A\0"
+dq 0x778899AABBCCDDEE
+
+.data16_range_s16:
+dq 0xEEDD00000002FFFE ; words 0xFFFE, 0x0002, 0 (followed by junk)
+dq 0x66558877AA99CCBB
+
+.data16_range_values:
+dq 0xFFFD80007FFF0001 ; words 0x0001, 0x7FFF, 0x8000, 0xFFFD
+dq 0x000000410003FFFF ; words 0xFFFF, 0x0003, 0x0041, 0
+
+.data_range_ff:
+dq 0xAABBCCDDEE00FFFF ; "\xff\xff\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_ff_str:
+dq 0xCCDDEE00FF62FF61 ; "a\xffb\xff\0" (followed by junk)
+dq 0x445566778899AABB
+
+.data_azA:
+dq 0xBBCCDDEE00417A61 ; "azA\0" (followed by junk)
+dq 0x33445566778899AA
+
+.data_abc_xyz:
+dq 0x007A797820434241 ; "ABC xyz\0"
+dq 0x778899AABBCCDDEE
 
 .indices:
 dq 0x0000000000000000

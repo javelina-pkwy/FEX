@@ -1,10 +1,10 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "XMM0": ["0x04060F000F000D07", "0x0000000000040407"],
-      "XMM1": ["0x1939313131311111", "0x0000000000191919"],
-      "XMM2": ["0x306F8A9E672C65E5", "0x000030443057697D"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3"]
+      "XMM0": ["0x04060F000F000D07", "0x0202011001040407"],
+      "XMM1": ["0x1939313131311111", "0x1919191011191919"],
+      "XMM2": ["0xAABBCCDDEE0080FF", "0x2233445566778899"],
+      "XMM3": ["0xEE00646380FF6261", "0x66778899AABBCCDD"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -105,6 +105,28 @@ CompareAndStore 9, 0b00110001
 ; Unsigned word character check (msb, negative masked)
 CompareAndStore 10, 0b01110001
 
+movaps xmm2, [rel .data_vowels]
+movaps xmm3, [rel .data_howdy]
+; Unsigned byte character check (lsb, positive masked)
+CompareAndStore 11, 0b00100000
+
+movaps xmm2, [rel .data_empty]
+; Empty character set
+CompareAndStore 12, 0b00000000
+
+movaps xmm2, [rel .data_vowels]
+movaps xmm3, [rel .data_hi]
+; Short string with set members past the null terminator (lsb)
+CompareAndStore 13, 0b00000000
+
+movaps xmm2, [rel .data_highbits]
+movaps xmm3, [rel .data_highbits_str]
+; Characters above 0x7F
+CompareAndStore 14, 0b00000000
+
+; Characters above 0x7F, signed
+CompareAndStore 15, 0b00000010
+
 ; Load all our stored indices and flags for result comparing
 movaps xmm0, [rel .indices]
 movaps xmm1, [rel .flags]
@@ -133,6 +155,30 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_vowels:
+dq 0xDDEE00756F696561 ; "aeiou\0" (followed by junk)
+dq 0x5566778899AABBCC
+
+.data_howdy:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
+
+.data_empty:
+dq 0x8899AABBCCDDEE00 ; "\0" (followed by junk)
+dq 0xF011223344556677
+
+.data_hi:
+dq 0x756F696561006948 ; "Hi\0aeiou"
+dq 0x778899AABBCCDDEE
+
+.data_highbits:
+dq 0xAABBCCDDEE0080FF ; "\xff\x80\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_highbits_str:
+dq 0xEE00646380FF6261 ; "ab\xff\x80cd\0" (followed by junk)
+dq 0x66778899AABBCCDD
 
 .indices:
 dq 0x0000000000000000

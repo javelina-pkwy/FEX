@@ -1,10 +1,12 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "XMM0": ["0x00060F000F000D01", "0x0000001010070007"],
-      "XMM1": ["0x3111313131311111", "0x0000001818313131"],
-      "XMM2": ["0x005A0041007A0061", "0x55AACCBBFF220000"],
-      "XMM3": ["0x0065002000270000", "0x00210065004F0065"]
+      "XMM0": ["0x00060F000F000D01", "0x0010001010070007"],
+      "XMM1": ["0x3111313131311111", "0x3918391818313131"],
+      "XMM2": ["0xBBCCDDEE00417A61", "0x33445566778899AA"],
+      "XMM3": ["0x007A797820434241", "0x778899AABBCCDDEE"],
+      "XMM4": ["0x0000000000040100", "0x0000000000000000"],
+      "XMM5": ["0x0000000000191931", "0x0000000000000000"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -115,9 +117,39 @@ CompareAndStore 11, 0b01000110
 ; Range signed byte check (lsb)
 CompareAndStore 12, 0b01000110
 
+movaps xmm2, [rel .data_range_s8]
+movaps xmm3, [rel .data_range_s8_str]
+; Signed byte range check (lsb, positive polarity)
+CompareAndStore 13, 0b00000110
+
+; Same range as unsigned bytes (empty range)
+CompareAndStore 14, 0b00000100
+
+movaps xmm2, [rel .data16_range_s16]
+movaps xmm3, [rel .data16_range_values]
+; Signed word range check (lsb, positive polarity)
+CompareAndStore 15, 0b00000111
+
+movaps xmm2, [rel .data_range_all]
+movaps xmm3, [rel .data_howdy]
+; Range covering every non-null byte
+CompareAndStore 16, 0b00000100
+
+movaps xmm2, [rel .data_range_ff]
+movaps xmm3, [rel .data_ff_str]
+; Single character range (lsb)
+CompareAndStore 17, 0b00000100
+
+movaps xmm2, [rel .data_azA]
+movaps xmm3, [rel .data_abc_xyz]
+; Odd number of range characters
+CompareAndStore 18, 0b00000100
+
 ; Load all our stored indices and flags for result comparing
 movaps xmm0, [rel .indices]
+movaps xmm4, [rel .indices + 16]
 movaps xmm1, [rel .flags]
+movaps xmm5, [rel .flags + 16]
 
 hlt
 
@@ -154,6 +186,46 @@ dq 0x0065002000270000 ; "\0' e"
 dq 0x00210065004F0065 ; "eOen!"
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_range_s8:
+dq 0xAABBCCDDEE0002FE ; "\xfe\x02\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_range_s8_str:
+dq 0x004103FFFD807F01 ; "\x01\x7f\x80\xfd\xff\x03A\0"
+dq 0x778899AABBCCDDEE
+
+.data16_range_s16:
+dq 0xEEDD00000002FFFE ; words 0xFFFE, 0x0002, 0 (followed by junk)
+dq 0x66558877AA99CCBB
+
+.data16_range_values:
+dq 0xFFFD80007FFF0001 ; words 0x0001, 0x7FFF, 0x8000, 0xFFFD
+dq 0x000000410003FFFF ; words 0xFFFF, 0x0003, 0x0041, 0
+
+.data_range_all:
+dq 0xAABBCCDDEE00FF01 ; "\x01\xff\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_howdy:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
+
+.data_range_ff:
+dq 0xAABBCCDDEE00FFFF ; "\xff\xff\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_ff_str:
+dq 0xCCDDEE00FF62FF61 ; "a\xffb\xff\0" (followed by junk)
+dq 0x445566778899AABB
+
+.data_azA:
+dq 0xBBCCDDEE00417A61 ; "azA\0" (followed by junk)
+dq 0x33445566778899AA
+
+.data_abc_xyz:
+dq 0x007A797820434241 ; "ABC xyz\0"
+dq 0x778899AABBCCDDEE
 
 .indices:
 dq 0x0000000000000000

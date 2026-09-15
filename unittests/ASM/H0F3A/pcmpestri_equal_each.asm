@@ -1,14 +1,14 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "RAX": ["4"],
-      "RDX": ["3"],
+      "RAX": ["0x80000000"],
+      "RDX": ["16"],
       "XMM0": ["0x0F000B060B060F00", "0x040407000F060706"],
       "XMM1": ["0x3939010101012121", "0x0101212119191919"],
-      "XMM2": ["0x306F8A9E672C65E5", "0x000030443057697D"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3"],
-      "XMM4": ["0x0704030307000404", "0x0000000000000000"],
-      "XMM5": ["0x1919191939390101", "0x0000000000000000"]
+      "XMM2": ["0x4546207964776F48", "0x212121736E616958"],
+      "XMM3": ["0x4546207964776F48", "0x212121736E616958"],
+      "XMM4": ["0x0704030307000404", "0x000F0F0410000000"],
+      "XMM5": ["0x1919191939390101", "0x0021213110392121"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -160,6 +160,42 @@ CompareAndStore 22, 0b00111001
 ; Non-full length unsigned word string check (msb, negative masked)
 CompareAndStore 23, 0b01111001
 
+movaps xmm2, [rel .data_howdy]
+movaps xmm3, [rel .data_howdy]
+mov rax, -16
+mov rdx, -16
+; Negative lengths
+CompareAndStore 24, 0b00001000
+
+mov rax, 17
+mov rdx, 100
+; Lengths above 16
+CompareAndStore 25, 0b00001000
+
+mov rax, 0
+mov rdx, 0
+; Both lengths zero (lsb)
+CompareAndStore 26, 0b00001000
+
+mov rdx, 16
+; Zero length against a full length
+CompareAndStore 27, 0b00001000
+
+mov rax, 0xFFFFFFFF00000005
+; Upper 32 bits of RAX ignored without REX.W
+CompareAndStore 28, 0b01001000
+
+; REX.W uses all 64 bits of RAX
+db 0x66, 0x48, 0x0F, 0x3A, 0x61, 0xD3, 0b01001000 ; REX.W pcmpestri xmm2, xmm3
+mov [rel .indices + 29], cl
+mov r15, rax
+ArrangeAndStoreFLAGS 29
+mov rax, r15
+
+mov rax, 0x80000000
+; INT_MIN length
+CompareAndStore 30, 0b01001000
+
 ; Load all our stored indices and flags for result comparing
 movaps xmm0, [rel .indices]
 movaps xmm4, [rel .indices + 16]
@@ -190,6 +226,10 @@ dq 0x306F8A9E672C65E5 ; "日本語は"
 dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data_howdy:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
 
 .indices:
 dq 0x0000000000000000

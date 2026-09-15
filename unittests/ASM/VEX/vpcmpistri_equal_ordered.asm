@@ -2,10 +2,10 @@
 {
   "HostFeatures": ["AVX"],
   "RegData": {
-      "XMM0": ["0x05050F000F000902", "0x0000000006000700", "0x0000000000000000", "0x0000000000000000"],
-      "XMM1": ["0x1919313131311111", "0x0000000039393939", "0x0000000000000000", "0x0000000000000000"],
-      "XMM2": ["0x306F000030443057", "0x000030443057697D", "0xAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBB"],
-      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3", "0x8888888888888888", "0x9999999999999999"]
+      "XMM0": ["0x05050F000F000902", "0x00000D0F06000700", "0x00000000000D080D", "0x0000000000000000"],
+      "XMM1": ["0x1919313131311111", "0x2131111139393939", "0x0000000000111811", "0x0000000000000000"],
+      "XMM2": ["0xAABBCCDDEE002121", "0x2233445566778899", "0x0000000000000000", "0x0000000000000000"],
+      "XMM3": ["0x306F8A9E672C65E5", "0x00003044305796E3", "0x0000000000000000", "0x0000000000000000"]
   }
 }
 %endif
@@ -107,6 +107,38 @@ CompareAndStore 10, 0b00111101
 ; Unsigned word string check (msb, negative masked)
 CompareAndStore 11, 0b01111101
 
+vmovaps xmm2, [rel .data_bangz]
+vmovaps xmm3, [rel .data_howdy]
+; Partial match running off the end of the string (lsb)
+CompareAndStore 12, 0b00001100
+
+vmovaps xmm2, [rel .data_bangbang]
+; Overlapping matches (lsb)
+CompareAndStore 13, 0b00001100
+
+vmovaps xmm2, [rel .data_empty]
+; Empty needle (lsb)
+CompareAndStore 14, 0b00001100
+
+vmovaps xmm2, [rel .data_howdy]
+; Full-length needle without null terminators
+CompareAndStore 15, 0b00001100
+
+vmovaps xmm2, [rel .data_bangbang]
+; Signed byte string check
+CompareAndStore 16, 0b00001110
+
+vmovaps xmm2, [rel .data16_needle]
+vmovaps xmm3, [rel .data16_japanese]
+; Word needle running into the null terminator
+CompareAndStore 17, 0b00001101
+
+vmovaps xmm2, [rel .data_bangbang]
+; Unaligned memory operand
+vpcmpistri xmm2, [rel .data_unaligned + 1], 0b00001100
+mov [rel .indices + 18], cl
+ArrangeAndStoreFLAGS 18
+
 ; Load all our stored indices and flags for result comparing
 vmovaps ymm0, [rel .indices]
 vmovaps ymm1, [rel .flags]
@@ -136,6 +168,36 @@ dq 0x00003044305796E3 ; "難しい\0" (Japanese is hard)
 dq 0x8888888888888888
 dq 0x9999999999999999
 
+.data_bangz:
+dq 0xAABBCCDDEE005A21 ; "!Z\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_howdy:
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
+
+.data_bangbang:
+dq 0xAABBCCDDEE002121 ; "!!\0" (followed by junk)
+dq 0x2233445566778899
+
+.data_empty:
+dq 0x8899AABBCCDDEE00 ; "\0" (followed by junk)
+dq 0xF011223344556677
+
+.data16_needle:
+dq 0xEEDD000012343044 ; words 0x3044, 0x1234, 0 (followed by junk)
+dq 0x66558877AA99CCBB
+
+.data16_japanese:
+dq 0x306F8A9E672C65E5 ; "日本語は"
+dq 0x00003044305796E3 ; "難しい\0"
+
+.data_unaligned:
+db 0x00 ; Misalign the string below
+dq 0x4546207964776F48 ; "Howdy FE"
+dq 0x212121736E616958 ; "Xians!!!"
+
+align 16
 .indices:
 dq 0x0000000000000000
 dq 0x0000000000000000

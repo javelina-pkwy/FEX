@@ -1,9 +1,9 @@
 %ifdef CONFIG
 {
   "RegData": {
-      "XMM1":  ["0x3111313131311111", "0x0000000000313131"],
-      "XMM2":  ["0x005A0041007A0061", "0x55AACCBBFF220000"],
-      "XMM3":  ["0x006500200027003F", "0x00210065004F0065"],
+      "XMM1":  ["0x3111313131311111", "0x0000000039313131"],
+      "XMM2":  ["0xEEDD00000002FFFE", "0x66558877AA99CCBB"],
+      "XMM3":  ["0xFFFD80007FFF0001", "0x000000410003FFFF"],
       "XMM4":  ["0x0000000000003DEA", "0x0000000000000000"],
       "XMM5":  ["0xFFFFFF00FF00FF00", "0x0000FFFFFFFF00FF"],
       "XMM6":  ["0x000000000000C215", "0x0000000000000000"],
@@ -14,7 +14,8 @@
       "XMM11": ["0x0000000000000087", "0x0000000000000000"],
       "XMM12": ["0x0000FFFFFFFFFFFF", "0xFFFF000000000000"],
       "XMM13": ["0x0000000000000087", "0x0000000000000000"],
-      "XMM14": ["0x0000FFFFFFFFFFFF", "0xFFFF000000000000"]
+      "XMM14": ["0x0000FFFFFFFFFFFF", "0xFFFF000000000000"],
+      "XMM15": ["0x0000000000000011", "0x0000000000000000"]
   },
   "HostFeatures": ["SSE4.2"]
 }
@@ -117,6 +118,13 @@ CompareAndStore 9, 0b00110101, 13
 CompareAndStore 10, 0b01110101, 14
 
 ; Load all our stored flags for result comparing
+
+movaps xmm2, [rel .data16_range_s16]
+movaps xmm3, [rel .data16_range_values]
+; Signed word range check (lsb, positive polarity)
+CompareAndStore 11, 0b00000111, 15
+
+; Load all our stored indices and flags for result comparing
 movaps xmm1, [rel .flags]
 
 hlt
@@ -143,6 +151,14 @@ dq 0x006500200027003F ; "?' e"
 dq 0x00210065004F0065 ; "eOen!"
 dq 0x8888888888888888
 dq 0x9999999999999999
+
+.data16_range_s16:
+dq 0xEEDD00000002FFFE ; words 0xFFFE, 0x0002, 0 (followed by junk)
+dq 0x66558877AA99CCBB
+
+.data16_range_values:
+dq 0xFFFD80007FFF0001 ; words 0x0001, 0x7FFF, 0x8000, 0xFFFD
+dq 0x000000410003FFFF ; words 0xFFFF, 0x0003, 0x0041, 0
 
 .flags:
 dq 0x0000000000000000
