@@ -5440,7 +5440,6 @@ void OpDispatchBuilder::VPERMILRegOp(OpcodeArgs, IR::OpSize ElementSize) {
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXExplicitLength(uint32_t GPR, bool Is64Bit, uint32_t NumElements) {
-  // Length is the absolute value of the register, saturated to NumElements.
   Ref Value = LoadGPRRegister(GPR);
   if (!Is64Bit) {
     Value = _Sbfe(OpSize::i64Bit, 32, 0, Value);

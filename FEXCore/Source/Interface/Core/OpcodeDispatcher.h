@@ -1388,13 +1388,13 @@ private:
   Ref PALIGNROpImpl(OpcodeArgs, const X86Tables::DecodedOperand& Src1, const X86Tables::DecodedOperand& Src2,
                     const X86Tables::DecodedOperand& Imm, bool IsAVX);
 
-  // Element layout of a PCMPXSTRX instruction, shared by its helpers.
   struct PCMPXSTRXLayout {
     IR::OpSize ElementSize;
     uint32_t NumElements;
-    Ref Indices;        // [0, 1, 2, ...]
-    Ref VecNumElements; // NumElements in each element
+    Ref Indices;
+    Ref VecNumElements;
   };
+
   void PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask, bool IsAVX);
   Ref PCMPXSTRXExplicitLength(uint32_t GPR, bool Is64Bit, uint32_t NumElements);
   Ref PCMPXSTRXImplicitLength(const PCMPXSTRXLayout& Layout, Ref Vector);
