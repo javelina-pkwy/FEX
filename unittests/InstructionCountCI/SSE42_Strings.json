@@ -37,7 +37,7 @@
   },
   "Instructions": {
     "pcmpestrm xmm0, xmm1, 0_0_00_00_00b": {
-      "ExpectedInstructionCount": 95,
+      "ExpectedInstructionCount": 91,
       "Comment": [
         "Bit mask (8-bit)",
         "0x66 0x0f 0x3A 0x60"
@@ -45,19 +45,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3776]",
         "movi v3.16b, #0x10",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x10",
-        "cmp x20, #0x10 (16)",
+        "cmp w20, #0x10 (16)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x10 (16)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x10 (16)",
         "csel w21, w22, w21, lo",
         "dup v4.16b, w20",
         "cmgt v4.16b, v4.16b, v2.16b",
@@ -141,7 +137,7 @@
       ]
     },
     "pcmpestrm xmm0, xmm1, 0_0_00_00_01b": {
-      "ExpectedInstructionCount": 70,
+      "ExpectedInstructionCount": 66,
       "Comment": [
         "Bit mask (16-bit)",
         "0x66 0x0f 0x3A 0x60"
@@ -149,19 +145,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3120]",
         "movi v3.8h, #0x8",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x8",
-        "cmp x20, #0x8 (8)",
+        "cmp w20, #0x8 (8)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x8 (8)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x8 (8)",
         "csel w21, w22, w21, lo",
         "dup v4.8h, w20",
         "cmgt v4.8h, v4.8h, v2.8h",
@@ -220,7 +212,7 @@
       ]
     },
     "pcmpestrm xmm0, xmm1, 0_1_00_00_00b": {
-      "ExpectedInstructionCount": 89,
+      "ExpectedInstructionCount": 85,
       "Comment": [
         "Expanded mask (8-bit)",
         "0x66 0x0f 0x3A 0x60"
@@ -228,19 +220,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3776]",
         "movi v3.16b, #0x10",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x10",
-        "cmp x20, #0x10 (16)",
+        "cmp w20, #0x10 (16)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x10 (16)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x10 (16)",
         "csel w21, w22, w21, lo",
         "dup v4.16b, w20",
         "cmgt v4.16b, v4.16b, v2.16b",
@@ -318,7 +306,7 @@
       ]
     },
     "pcmpestrm xmm0, xmm1, 0_1_00_00_01b": {
-      "ExpectedInstructionCount": 65,
+      "ExpectedInstructionCount": 61,
       "Comment": [
         "Expanded mask (16-bit)",
         "0x66 0x0f 0x3A 0x60"
@@ -326,19 +314,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3120]",
         "movi v3.8h, #0x8",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x8",
-        "cmp x20, #0x8 (8)",
+        "cmp w20, #0x8 (8)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x8 (8)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x8 (8)",
         "csel w21, w22, w21, lo",
         "dup v4.8h, w20",
         "cmgt v4.8h, v4.8h, v2.8h",
@@ -392,7 +376,7 @@
       ]
     },
     "pcmpestri xmm0, xmm1, 0_0_00_00_00b": {
-      "ExpectedInstructionCount": 89,
+      "ExpectedInstructionCount": 85,
       "Comment": [
         "8-bit",
         "0x66 0x0f 0x3A 0x61"
@@ -400,19 +384,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3776]",
         "movi v3.16b, #0x10",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x10",
-        "cmp x20, #0x10 (16)",
+        "cmp w20, #0x10 (16)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x10 (16)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x10 (16)",
         "csel w21, w22, w21, lo",
         "dup v4.16b, w20",
         "cmgt v4.16b, v4.16b, v2.16b",
@@ -490,7 +470,7 @@
       ]
     },
     "pcmpestri xmm0, xmm1, 0_0_00_00_01b": {
-      "ExpectedInstructionCount": 65,
+      "ExpectedInstructionCount": 61,
       "Comment": [
         "16-bit",
         "0x66 0x0f 0x3A 0x61"
@@ -498,19 +478,15 @@
       "ExpectedArm64ASM": [
         "ldr q2, [x28, #3120]",
         "movi v3.8h, #0x8",
-        "sxtw x20, w4",
         "mov w27, #0x0",
-        "neg x21, x20",
-        "cmp x20, #0x0 (0)",
-        "csel x20, x21, x20, lt",
+        "cmp w4, #0x0 (0)",
+        "cneg w20, w4, mi",
         "mov w21, #0x8",
-        "cmp x20, #0x8 (8)",
+        "cmp w20, #0x8 (8)",
         "csel w20, w20, w21, lo",
-        "sxtw x22, w5",
-        "neg x23, x22",
-        "cmp x22, #0x0 (0)",
-        "csel x22, x23, x22, lt",
-        "cmp x22, #0x8 (8)",
+        "cmp w5, #0x0 (0)",
+        "cneg w22, w5, mi",
+        "cmp w22, #0x8 (8)",
         "csel w21, w22, w21, lo",
         "dup v4.8h, w20",
         "cmgt v4.8h, v4.8h, v2.8h",

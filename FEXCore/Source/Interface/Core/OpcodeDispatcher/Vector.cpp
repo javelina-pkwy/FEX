@@ -5439,31 +5439,24 @@ void OpDispatchBuilder::VPERMILRegOp(OpcodeArgs, IR::OpSize ElementSize) {
   StoreResultFPR(Op, Result);
 }
 
-Ref OpDispatchBuilder::PCMPXSTRXExplicitLength(uint32_t GPR, bool Is64Bit, uint32_t NumElements) {
+Ref OpDispatchBuilder::PCMPXSTRXExplicitLength(uint32_t GPR, OpSize Size, uint32_t NumElements) {
+  // The length is the absolute value of the register, clamped to the number of elements.
+  //
+  // We clobber NZCV to negate conditionally, which is fine since we overwrite
+  // all of the flags at the end of the instruction anyway.
   Ref Value = LoadGPRRegister(GPR);
-  if (!Is64Bit) {
-    Value = _Sbfe(OpSize::i64Bit, 32, 0, Value);
-  }
-  Ref Abs = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::SLT, Value, Constant(0), _Neg(OpSize::i64Bit, Value), Value);
-  // Unsigned compare so that INT64_MIN saturates as well.
-  return _Select(OpSize::i32Bit, OpSize::i64Bit, CondClass::ULT, Abs, Constant(NumElements), Abs, Constant(NumElements));
-}
+  SaveNZCV();
+  _SubNZCV(Size, Value, Constant(0));
+  Ref Abs = _Neg(Size, Value, CondClass::MI);
 
-Ref OpDispatchBuilder::PCMPXSTRXImplicitLength(const PCMPXSTRXLayout& Layout, Ref Vector) {
-  // Length is the index of the first NUL element, or NumElements if there is none. Returned in element 0.
-  Ref IsZero = _VCMPEQZ(OpSize::i128Bit, Layout.ElementSize, Vector);
-  Ref Candidates = _VBSL(OpSize::i128Bit, IsZero, Layout.Indices, Layout.VecNumElements);
-  return _VUMinV(OpSize::i128Bit, Layout.ElementSize, Candidates);
-}
-
-Ref OpDispatchBuilder::PCMPXSTRXValidMask(const PCMPXSTRXLayout& Layout, Ref LengthVector) {
-  // All ones in the elements below the length, which is broadcast in LengthVector.
-  return _VCMPGT(OpSize::i128Bit, Layout.ElementSize, LengthVector, Layout.Indices);
+  // We compare unsigned so that the most negative value, whose negation is
+  // still negative, also clamps to the number of elements.
+  return _Select(OpSize::i32Bit, Size, CondClass::ULT, Abs, Constant(NumElements), Abs, Constant(NumElements));
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXEqualAny(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR) {
-  // Set each RHS element that matches any valid LHS element.
-  // Invalid LHS elements are replaced with LHS[0] so they can't add matches.
+  // We set each RHS element that matches any valid LHS element. Invalid LHS
+  // elements are replaced with LHS[0] so that they can't add any matches.
   Ref First = _VDupElement(OpSize::i128Bit, Layout.ElementSize, Src1, 0);
   Ref Set = _VBSL(OpSize::i128Bit, ValidL, Src1, First);
   Ref Result = _VCMPEQ(OpSize::i128Bit, Layout.ElementSize, Src2, First);
@@ -5471,18 +5464,20 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualAny(const PCMPXSTRXLayout& Layout, Ref Src1
     Ref Element = _VDupElement(OpSize::i128Bit, Layout.ElementSize, Set, i);
     Result = _VOr(OpSize::i128Bit, Result, _VCMPEQ(OpSize::i128Bit, Layout.ElementSize, Src2, Element));
   }
-  // An empty LHS matches nothing, ValidL[0] is only set if LHS is non-empty.
+
+  // An empty LHS matches nothing, so we also mask with ValidL[0], which is
+  // only set when LHS is non-empty.
   Result = _VAnd(OpSize::i128Bit, Result, _VDupElement(OpSize::i128Bit, Layout.ElementSize, ValidL, 0));
   return _VAnd(OpSize::i128Bit, Result, ValidR);
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXRanges(const PCMPXSTRXLayout& Layout, bool IsSigned, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR) {
-  // Set each RHS element that falls within any of the [LHS[2k], LHS[2k+1]] ranges.
+  // We set each RHS element that falls within any of the [LHS[2k], LHS[2k+1]] ranges.
   const bool IsWords = Layout.ElementSize == OpSize::i16Bit;
   Ref L = Src1;
   Ref R = Src2;
   if (!IsSigned) {
-    // Only signed vector compares are available, bias in to the signed domain.
+    // We only have signed vector compares, so bias both operands into the signed domain.
     Ref Bias = _VectorImm(OpSize::i128Bit, Layout.ElementSize, 0x80, IsWords ? 8 : 0);
     L = _VXor(OpSize::i128Bit, L, Bias);
     R = _VXor(OpSize::i128Bit, R, Bias);
@@ -5505,8 +5500,8 @@ Ref OpDispatchBuilder::PCMPXSTRXRanges(const PCMPXSTRXLayout& Layout, bool IsSig
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXEqualEach(const PCMPXSTRXLayout& Layout, Ref Src1, Ref Src2, Ref ValidL, Ref ValidR) {
-  // Compare LHS[j] with RHS[j]. Elements past the end of both strings match,
-  // elements past the end of only one of them don't.
+  // We compare LHS[j] with RHS[j]. Elements past the end of both strings match,
+  // while elements past the end of only one of them don't.
   Ref Equal = _VCMPEQ(OpSize::i128Bit, Layout.ElementSize, Src1, Src2);
   Ref BothValid = _VAnd(OpSize::i128Bit, ValidL, ValidR);
   Ref EitherValid = _VOr(OpSize::i128Bit, ValidL, ValidR);
@@ -5514,11 +5509,12 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualEach(const PCMPXSTRXLayout& Layout, Ref Src
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXEqualOrdered(const PCMPXSTRXLayout& Layout, bool IsExplicit, Ref Src1, Ref Src2, Ref LenL, Ref LenR, Ref LenRVector) {
-  // Set each RHS element where the LHS string starts.
-  // Sum accumulates the prefix-AND of the per-element compares, so each element
-  // ends up holding the negated number of leading LHS elements that match there.
+  // We set each RHS element where the LHS string starts. Sum accumulates the
+  // prefix-AND of the per-element compares, so each element ends up holding
+  // the negated number of leading LHS elements that match there.
+  //
   // The shifted RHS is filled with the LHS element so that positions past the
-  // end of RHS count as matching, partial matches at the end are valid.
+  // end of RHS count as matching, since partial matches at the end are valid.
   Ref Prefix {};
   Ref Sum {};
   for (uint32_t i = 0; i < Layout.NumElements; i++) {
@@ -5528,72 +5524,29 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualOrdered(const PCMPXSTRXLayout& Layout, bool
     Prefix = Prefix ? _VAnd(OpSize::i128Bit, Prefix, Equal) : Equal;
     Sum = Sum ? _VAdd(OpSize::i128Bit, Layout.ElementSize, Sum, Prefix) : Prefix;
   }
-  // Match if at least LenL leading elements match, Sum <= -LenL.
+
+  // We have a match when at least LenL leading elements match, i.e. Sum <= -LenL.
   Ref Threshold = _VDupFromGPR(OpSize::i128Bit, Layout.ElementSize, _Sub(OpSize::i32Bit, Constant(1), LenL));
   Ref Result = _VCMPGT(OpSize::i128Bit, Layout.ElementSize, Threshold, Sum);
 
   // Valid LHS elements compared against invalid RHS elements are forced to mismatch.
   if (!IsExplicit) {
-    // Valid LHS elements are never zero with implicit lengths, so the NUL in RHS already
-    // mismatches for starts at or before it. Only starts past it can match garbage, clear
-    // those unless LHS is empty (which matches everywhere).
+    // Valid LHS elements are never zero with implicit lengths, so the NUL in RHS
+    // already mismatches for starts at or before it. Only starts past it can match
+    // garbage, so we clear those unless LHS is empty, which matches everywhere.
     Ref PastEnd = _VCMPGT(OpSize::i128Bit, Layout.ElementSize, Layout.Indices, LenRVector);
     Ref Empty = _VCMPGTZ(OpSize::i128Bit, Layout.ElementSize, Threshold);
     return _VAndn(OpSize::i128Bit, Result, _VAndn(OpSize::i128Bit, PastEnd, Empty));
   }
 
-  // Explicit lengths can have zero in valid elements, so force the mismatch through
-  // a limit instead. It clears every position from LenR - LenL + 1 onwards when RHS
-  // has invalid elements and LHS isn't empty.
+  // Explicit lengths can have zero in valid elements, so we force the mismatch
+  // through a limit instead. It clears every position from LenR - LenL + 1 onwards
+  // when RHS has invalid elements and LHS isn't empty.
   Ref Limit = Add(OpSize::i32Bit, _Sub(OpSize::i32Bit, LenR, LenL), 1);
   Limit = _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::ULT, LenR, Constant(Layout.NumElements), Limit, Constant(Layout.NumElements));
   Limit = _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::EQ, LenL, Constant(0), Constant(Layout.NumElements), Limit);
-  return _VAnd(OpSize::i128Bit, Result, PCMPXSTRXValidMask(Layout, _VDupFromGPR(OpSize::i128Bit, Layout.ElementSize, Limit)));
-}
-
-Ref OpDispatchBuilder::PCMPXSTRXLowestIndex(const PCMPXSTRXLayout& Layout, Ref Matches) {
-  // Index of the lowest set element, or NumElements if none are set.
-  Ref Candidates = _VBSL(OpSize::i128Bit, Matches, Layout.Indices, Layout.VecNumElements);
-  return _VExtractToGPR(OpSize::i128Bit, Layout.ElementSize, _VUMinV(OpSize::i128Bit, Layout.ElementSize, Candidates), 0);
-}
-
-Ref OpDispatchBuilder::PCMPXSTRXHighestIndex(const PCMPXSTRXLayout& Layout, Ref Matches, Ref Lowest) {
-  // Index of the highest set element, or NumElements if none are set.
-  // Lowest distinguishes no set elements from element 0 being set.
-  Ref Candidates = _VAnd(OpSize::i128Bit, Layout.Indices, Matches);
-  Ref Highest = _VExtractToGPR(OpSize::i128Bit, Layout.ElementSize, _VUMaxV(OpSize::i128Bit, Layout.ElementSize, Candidates), 0);
-  return _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::EQ, Lowest, Constant(Layout.NumElements), Constant(Layout.NumElements), Highest);
-}
-
-Ref OpDispatchBuilder::PCMPXSTRXBitMask(const PCMPXSTRXLayout& Layout, Ref Matches) {
-  // Bit mask of the set elements, zero extended.
-  Ref Weights = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_MOVMASKB);
-  Ref Zero = LoadZeroVector(OpSize::i128Bit);
-  if (Layout.ElementSize == OpSize::i16Bit) {
-    // Narrow to bytes and add the 8 weights together.
-    Ref Bytes = _VUnZip(OpSize::i128Bit, OpSize::i8Bit, Matches, Zero);
-    return _VAddV(OpSize::i128Bit, OpSize::i8Bit, _VAnd(OpSize::i128Bit, Bytes, Weights));
-  }
-
-  // Pairwise adds within each 8 bytes give the low and high byte of the mask.
-  Ref Mask = _VAnd(OpSize::i128Bit, Matches, Weights);
-  Mask = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Mask, Zero);
-  Mask = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Mask, Zero);
-  return _VAddP(OpSize::i128Bit, OpSize::i8Bit, Mask, Zero);
-}
-
-Ref OpDispatchBuilder::PCMPXSTRXFlags(uint32_t NumElements, Ref LenL, Ref LenR, Ref Lowest) {
-  // SF: LHS has invalid elements. ZF: RHS has invalid elements.
-  // CF: any element is set. OF: element 0 is set.
-  // CF is produced inverted since that's the convention at the end of the block.
-  Ref SF = Select01(OpSize::i32Bit, CondClass::ULT, LenL, Constant(NumElements));
-  Ref ZF = Select01(OpSize::i32Bit, CondClass::ULT, LenR, Constant(NumElements));
-  Ref CF = Select01(OpSize::i32Bit, CondClass::EQ, Lowest, Constant(NumElements));
-  Ref OF = Select01(OpSize::i32Bit, CondClass::EQ, Lowest, Constant(0));
-
-  Ref NZCV = _Orlshl(OpSize::i64Bit, _Lshl(OpSize::i64Bit, OF, Constant(28)), CF, 29);
-  NZCV = _Orlshl(OpSize::i64Bit, NZCV, ZF, 30);
-  return _Orlshl(OpSize::i64Bit, NZCV, SF, 31);
+  Ref LimitVector = _VDupFromGPR(OpSize::i128Bit, Layout.ElementSize, Limit);
+  return _VAnd(OpSize::i128Bit, Result, _VCMPGT(OpSize::i128Bit, Layout.ElementSize, LimitVector, Layout.Indices));
 }
 
 void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask, bool IsAVX) {
@@ -5608,31 +5561,47 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   Ref Src1 = LoadSourceFPR_WithOpSize(Op, Op->Dest, OpSize::i128Bit, Op->Flags);
   Ref Src2 = LoadSourceFPR_WithOpSize(Op, Op->Src[0], OpSize::i128Bit, Op->Flags, {.Align = OpSize::i8Bit});
 
+  // control[1:0] selects the element format, control[3:2] the aggregation
+  // and control[5:4] the polarity.
   const auto Format = static_cast<CPU::SourceData>(Control & 0b11);
+  const auto Aggregation = static_cast<CPU::AggregationOp>((Control >> 2) & 0b11);
+  const auto Polarity = static_cast<CPU::Polarity>((Control >> 4) & 0b11);
   const bool IsWords = Format == CPU::SourceData::U16 || Format == CPU::SourceData::S16;
   const bool IsSigned = Format == CPU::SourceData::S8 || Format == CPU::SourceData::S16;
   const auto ElementSize = IsWords ? OpSize::i16Bit : OpSize::i8Bit;
-  const uint32_t NumElements = 16U >> (Control & 1);
+  const uint32_t NumElements = IsWords ? 8 : 16;
   const PCMPXSTRXLayout Layout {
     .ElementSize = ElementSize,
     .NumElements = NumElements,
     .Indices = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, IsWords ? NAMED_VECTOR_INCREMENTAL_U16_INDEX : NAMED_VECTOR_INCREMENTAL_U8_INDEX),
-    .VecNumElements = _VectorImm(OpSize::i128Bit, ElementSize, NumElements),
+  };
+  Ref VecNumElements = _VectorImm(OpSize::i128Bit, ElementSize, NumElements);
+
+  // Index of the lowest set element in Mask, or NumElements if none are set,
+  // as a scalar in element 0.
+  const auto LowestIndex = [&](Ref Mask) {
+    Ref Candidates = _VBSL(OpSize::i128Bit, Mask, Layout.Indices, VecNumElements);
+    return _VUMinV(OpSize::i128Bit, ElementSize, Candidates);
   };
 
-  // control[3:2] selects the aggregation and control[5:4] the polarity.
-  // Equal ordered works from the lengths (broadcast RHS length included with implicit lengths)
-  // and only needs the RHS mask for negative masked polarity.
-  const auto Aggregation = static_cast<CPU::AggregationOp>((Control >> 2) & 0b11);
-  const auto Polarity = static_cast<CPU::Polarity>((Control >> 4) & 0b11);
+  // All ones in the elements below the length, which is broadcast in LengthVector.
+  const auto ValidMask = [&](Ref LengthVector) {
+    return _VCMPGT(OpSize::i128Bit, ElementSize, LengthVector, Layout.Indices);
+  };
+
+  // Equal ordered works from the lengths (including the broadcast RHS length with
+  // implicit lengths) and only needs the RHS mask for negative masked polarity.
+  // Nothing removes dead IR for us, so we only emit the masks that are needed.
   const bool IsEqualOrdered = Aggregation == CPU::AggregationOp::EqualOrdered;
   const bool NeedsValidL = !IsEqualOrdered;
   const bool NeedsValidR = !IsEqualOrdered || Polarity == CPU::Polarity::NegativeMasked;
   const bool NeedsLenRVector = NeedsValidR || !IsExplicit;
 
-  // Number of valid elements in each source, clamped to [0, NumElements], as a GPR
-  // and broadcast to a vector for the masks. Broadcasting from the reduced vector
-  // keeps the GPR round trip off the critical path.
+  // Number of valid elements in each source, clamped to [0, NumElements], both as
+  // a GPR and broadcast to a vector for the masks.
+  //
+  // NOTE: With implicit lengths we broadcast from the reduced vector rather than
+  //       the GPR, which keeps the GPR round trip off the critical path.
   Ref LenL {};
   Ref LenR {};
   Ref LenRVector {};
@@ -5640,32 +5609,32 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   if (IsExplicit) {
     // Will be 4 in the absence of a REX.W bit and 8 in the presence of a REX.W bit.
     const auto SrcSize = OpSizeFromSrc(Op);
-    const auto Is64Bit = SrcSize == OpSize::i64Bit;
 
-    LenL = PCMPXSTRXExplicitLength(X86State::REG_RAX, Is64Bit, NumElements);
-    LenR = PCMPXSTRXExplicitLength(X86State::REG_RDX, Is64Bit, NumElements);
+    LenL = PCMPXSTRXExplicitLength(X86State::REG_RAX, SrcSize, NumElements);
+    LenR = PCMPXSTRXExplicitLength(X86State::REG_RDX, SrcSize, NumElements);
     if (NeedsValidL) {
-      ValidL = PCMPXSTRXValidMask(Layout, _VDupFromGPR(OpSize::i128Bit, ElementSize, LenL));
+      ValidL = ValidMask(_VDupFromGPR(OpSize::i128Bit, ElementSize, LenL));
     }
     if (NeedsLenRVector) {
       LenRVector = _VDupFromGPR(OpSize::i128Bit, ElementSize, LenR);
     }
   } else {
-    Ref MinL = PCMPXSTRXImplicitLength(Layout, Src1);
-    Ref MinR = PCMPXSTRXImplicitLength(Layout, Src2);
+    // The implicit length is the index of the first NUL element.
+    Ref MinL = LowestIndex(_VCMPEQZ(OpSize::i128Bit, ElementSize, Src1));
+    Ref MinR = LowestIndex(_VCMPEQZ(OpSize::i128Bit, ElementSize, Src2));
     LenL = _VExtractToGPR(OpSize::i128Bit, ElementSize, MinL, 0);
     LenR = _VExtractToGPR(OpSize::i128Bit, ElementSize, MinR, 0);
     if (NeedsValidL) {
-      ValidL = PCMPXSTRXValidMask(Layout, _VDupElement(OpSize::i128Bit, ElementSize, MinL, 0));
+      ValidL = ValidMask(_VDupElement(OpSize::i128Bit, ElementSize, MinL, 0));
     }
     if (NeedsLenRVector) {
       LenRVector = _VDupElement(OpSize::i128Bit, ElementSize, MinR, 0);
     }
   }
-  Ref ValidR = NeedsValidR ? PCMPXSTRXValidMask(Layout, LenRVector) : nullptr;
+  Ref ValidR = NeedsValidR ? ValidMask(LenRVector) : nullptr;
 
-  // All ones in each element where the aggregation matched.
-  // (See 4.1.5 Aggregation Operation and 4.1.6 Valid/Invalid Override of Comparisons in the Intel Software Development Manual)
+  // All ones in each element where the aggregation matched (see "Aggregation Operation"
+  // and "Valid/Invalid Override of Comparisons" in the Intel Software Development Manual).
   Ref Matches {};
   switch (Aggregation) {
   case CPU::AggregationOp::EqualAny: Matches = PCMPXSTRXEqualAny(Layout, Src1, Src2, ValidL, ValidR); break;
@@ -5681,8 +5650,8 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
     Matches = _VXor(OpSize::i128Bit, Matches, ValidR);
   }
 
-  // Needed for the flags regardless of the output form.
-  Ref Lowest = PCMPXSTRXLowestIndex(Layout, Matches);
+  // We need the index of the lowest set element for the flags regardless of the output form.
+  Ref Lowest = _VExtractToGPR(OpSize::i128Bit, ElementSize, LowestIndex(Matches), 0);
 
   if (IsMask) {
     // For the masked variant of the instructions, if control[6] is set, then we
@@ -5691,7 +5660,23 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
     // bits of XMM0 and zero extend it.
     const auto IsExpandedMask = (Control & 0b0100'0000) != 0;
 
-    Ref Result = IsExpandedMask ? Matches : PCMPXSTRXBitMask(Layout, Matches);
+    Ref Result = Matches;
+    if (!IsExpandedMask) {
+      Ref Weights = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_MOVMASKB);
+      Ref Zero = LoadZeroVector(OpSize::i128Bit);
+      if (IsWords) {
+        // We narrow the words to bytes so that the 8 weights can be added together.
+        Ref Bytes = _VUnZip(OpSize::i128Bit, OpSize::i8Bit, Matches, Zero);
+        Result = _VAddV(OpSize::i128Bit, OpSize::i8Bit, _VAnd(OpSize::i128Bit, Bytes, Weights));
+      } else {
+        // Pairwise adds within each 8 bytes give us the low and high byte of the mask.
+        Result = _VAnd(OpSize::i128Bit, Matches, Weights);
+        Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
+        Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
+        Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
+      }
+    }
+
     if (IsAVX) {
       StoreXMMRegister(0, Result);
     } else {
@@ -5703,14 +5688,35 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
     // then we store the least significant bit.
     const auto UseMSBIndex = (Control & 0b0100'0000) != 0;
 
-    Ref Result = UseMSBIndex ? PCMPXSTRXHighestIndex(Layout, Matches, Lowest) : Lowest;
+    Ref Result = Lowest;
+    if (UseMSBIndex) {
+      // The highest set index is the maximum of the indices of the set elements,
+      // but that is also 0 when nothing is set, so we use the lowest index to
+      // tell those cases apart.
+      Ref Candidates = _VAnd(OpSize::i128Bit, Layout.Indices, Matches);
+      Ref Highest = _VExtractToGPR(OpSize::i128Bit, ElementSize, _VUMaxV(OpSize::i128Bit, ElementSize, Candidates), 0);
+      Result = _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::EQ, Lowest, Constant(NumElements), Constant(NumElements), Highest);
+    }
 
     // Store the result, it is already zero-extended to 64-bit implicitly.
     StoreGPRRegister(X86State::REG_RCX, Result);
   }
 
   // Set all of the necessary flags. NZCV stored in bits 28...31 like the hw op.
-  SetNZCV(PCMPXSTRXFlags(NumElements, LenL, LenR, Lowest));
+  // SF and ZF are set if LHS and RHS respectively contain invalid elements,
+  // CF is set if any element matched and OF if element 0 matched.
+  //
+  // We produce CF inverted since that is what the flag store expects, which
+  // saves an inversion at the end of the block.
+  Ref SF = Select01(OpSize::i32Bit, CondClass::ULT, LenL, Constant(NumElements));
+  Ref ZF = Select01(OpSize::i32Bit, CondClass::ULT, LenR, Constant(NumElements));
+  Ref CF = Select01(OpSize::i32Bit, CondClass::EQ, Lowest, Constant(NumElements));
+  Ref OF = Select01(OpSize::i32Bit, CondClass::EQ, Lowest, Constant(0));
+
+  Ref NZCV = _Orlshl(OpSize::i64Bit, _Lshl(OpSize::i64Bit, OF, Constant(28)), CF, 29);
+  NZCV = _Orlshl(OpSize::i64Bit, NZCV, ZF, 30);
+  NZCV = _Orlshl(OpSize::i64Bit, NZCV, SF, 31);
+  SetNZCV(NZCV);
   CFInverted = true;
   ZeroPF_AF();
 }
