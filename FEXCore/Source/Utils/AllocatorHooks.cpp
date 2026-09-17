@@ -27,11 +27,9 @@ using vma_name_hook_type = void (*)(const char* name, const void* address, size_
 #ifdef ENABLE_FEX_ALLOCATOR
 typedef void* (*rp_mmap_hook_type)(size_t size, size_t alignment, size_t* offset, size_t* mapped_size);
 typedef void (*rp_munmap_hook_type)(void* address, size_t offset, size_t mapped_size);
-typedef void (*rp_commit_hook_type)(void* address, size_t size);
 typedef void (*vma_name_hook_type)(const char* name, const void* address, size_t size);
 extern "C" rp_mmap_hook_type rp_mmap_hook;
 extern "C" rp_munmap_hook_type rp_munmap_hook;
-extern "C" rp_commit_hook_type rp_commit_hook;
 extern "C" vma_name_hook_type rp_name_hook;
 
 #ifndef _WIN32
@@ -190,12 +188,22 @@ static rpmalloc_interface_t global_interface {
   .error_callback = nullptr,
 };
 
+// rpmalloc initializes itself on first use, which happens during static initialization long before
+// InitializeAllocator runs. Once initialized it ignores any later interface, and its own Linux commit
+// callback does nothing. Install our interface first so PROT_NONE reservations get committed.
+__attribute__((constructor(101))) static void InitializeAllocatorEarly() {
+  const long PageSize = sysconf(_SC_PAGESIZE);
+  if (PageSize > 0) {
+    global_config.page_size = PageSize;
+  }
+  rpmalloc_initialize_config(&global_interface, &global_config);
+}
+
 void InitializeAllocator(size_t PageSize) {
   global_config.page_size = PageSize;
   rpmalloc_initialize_config(&global_interface, &global_config);
   rp_mmap_hook = FEX_rp_mmap;
   rp_munmap_hook = FEX_rp_memory_unmap;
-  rp_commit_hook = FEX_rp_memory_commit;
   rp_name_hook = LocalVirtualName;
 }
 #else
