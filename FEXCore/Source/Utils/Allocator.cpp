@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/user.h>
 #endif
 
@@ -238,17 +239,29 @@ fextl::vector<MemoryRegion> StealMemoryRegion(uintptr_t Begin, uintptr_t End) {
 
     if (IsStackMapping && StackRegionIt != Regions.begin() &&
         reinterpret_cast<uintptr_t>(std::prev(StackRegionIt)->Ptr) + std::prev(StackRegionIt)->Size <= End) {
-      // Allocate the region under the stack as READ | WRITE so the stack can still grow
+      // Allocate the region under the stack as READ | WRITE so the stack can still grow.
+      // Only RLIMIT_STACK worth of it though (1GB if unlimited): the kernel counts private writable
+      // mappings towards RLIMIT_DATA, and the ASLR gap below the stack can be tens of terabytes.
       --StackRegionIt;
 
-      auto Alloc =
-        ::mmap(StackRegionIt->Ptr, StackRegionIt->Size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+      struct rlimit StackLimit {};
+      size_t Size = 1ULL << 30;
+      if (getrlimit(RLIMIT_STACK, &StackLimit) == 0 && StackLimit.rlim_cur != RLIM_INFINITY) {
+        Size = std::max<size_t>(FEXCore::AlignUp(StackLimit.rlim_cur, 64 * 1024), 64 * 1024);
+      }
+      Size = std::min(Size, StackRegionIt->Size);
+      StackRegionIt->Size -= Size;
+      void* Ptr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(StackRegionIt->Ptr) + StackRegionIt->Size);
 
-      LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion:Stack: mmap({}, {:x}) failed: {}", fmt::ptr(StackRegionIt->Ptr),
-                          StackRegionIt->Size, errno);
-      LogMan::Throw::AFmt(Alloc == StackRegionIt->Ptr, "mmap returned {} instead of {}", Alloc, fmt::ptr(StackRegionIt->Ptr));
+      auto Alloc = ::mmap(Ptr, Size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
 
-      Regions.erase(StackRegionIt);
+      LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion:Stack: mmap({}, {:x}) failed: {}", fmt::ptr(Ptr), Size, errno);
+      LogMan::Throw::AFmt(Alloc == Ptr, "mmap returned {} instead of {}", Alloc, fmt::ptr(Ptr));
+
+      // The rest of the gap stays in the list and gets blocked below.
+      if (StackRegionIt->Size == 0) {
+        Regions.erase(StackRegionIt);
+      }
     }
   }
 
