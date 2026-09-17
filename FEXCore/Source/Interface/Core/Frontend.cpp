@@ -1709,7 +1709,7 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
     if (EraseBlock) {
       BlockInfo.Blocks.erase(BlockIt);
     } else {
-      BlocksToDecode.merge(CurrentBlockTargets);
+      BlocksToDecode.insert(CurrentBlockTargets.begin(), CurrentBlockTargets.end());
     }
 
     CurrentBlockTargets.clear();

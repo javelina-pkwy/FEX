@@ -10,6 +10,7 @@
 #include <FEXCore/fextl/set.h>
 #include <FEXCore/fextl/vector.h>
 #include <FEXCore/fextl/robin_map.h>
+#include <FEXCore/fextl/robin_set.h>
 
 #include <array>
 #include <cstddef>
@@ -195,9 +196,10 @@ private:
   uint64_t NextBlockStartAddress {~0ULL};
 
   DecodedBlockInformation BlockInfo;
-  fextl::set<uint64_t> CurrentBlockTargets;
+  fextl::robin_set<uint64_t> CurrentBlockTargets;
+  // Ordered: DecodeLoop always takes the lowest pending address next.
   fextl::set<uint64_t> BlocksToDecode;
-  fextl::set<uint64_t> VisitedBlocks;
+  fextl::robin_set<uint64_t> VisitedBlocks;
   fextl::set<uint64_t>* ExternalBranches {nullptr};
 
   const fextl::robin_map<uint32_t, GuestRelocationType>* Relocations {nullptr};

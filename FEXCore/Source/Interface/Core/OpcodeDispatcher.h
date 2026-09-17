@@ -17,6 +17,7 @@
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/fextl/map.h>
+#include <FEXCore/fextl/robin_map.h>
 #include <FEXCore/fextl/vector.h>
 
 #include <bit>
@@ -1351,7 +1352,7 @@ private:
   // FEX convention for CF at the end of blocks: INVERTED.
   const bool CFInvertedABI {true};
 
-  fextl::map<uint64_t, JumpTargetInfo> JumpTargets;
+  fextl::robin_map<uint64_t, JumpTargetInfo> JumpTargets;
   bool HandledLock {false};
   bool DecodeFailure {false};
   bool NeedsBlockEnd {false};
