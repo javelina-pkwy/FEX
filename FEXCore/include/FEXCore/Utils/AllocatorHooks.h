@@ -70,6 +70,9 @@ inline void VirtualFree(void* Ptr, size_t Size) {
   ::VirtualFree(Ptr, 0, MEM_RELEASE);
 }
 
+// Reserved (uncommitted) regions are committed on demand by the OvercommitTracker.
+inline void VirtualCommit(void* Ptr, size_t Size) {}
+
 inline void VirtualDontNeed(void* Ptr, size_t Size, bool Recommit = true) {
   // Zero the page-aligned region, preserving permissions.
   MEMORY_BASIC_INFORMATION Info;
@@ -111,18 +114,24 @@ FEX_DEFAULT_VISIBILITY extern MMAP_Hook mmap;
 FEX_DEFAULT_VISIBILITY extern MUNMAP_Hook munmap;
 FEX_DEFAULT_VISIBILITY extern void VirtualName(const char* Name, void* Ptr, size_t Size);
 
-// All commit parameters are ignored here, they are unnecessary as Linux supports overcommit
-
-inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true) {
-  return FEXCore::Allocator::mmap(nullptr, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-}
+// Uncommitted memory is reserved as PROT_NONE so it doesn't count towards RLIMIT_DATA.
+// It must be committed with VirtualCommit before use.
 
 inline void* VirtualAlloc(void* Base, size_t Size, bool Execute = false, bool Commit = true) {
-  return FEXCore::Allocator::mmap(Base, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  const int Prot = Commit ? (PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0)) : PROT_NONE;
+  return FEXCore::Allocator::mmap(Base, Size, Prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+}
+
+inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true) {
+  return VirtualAlloc(nullptr, Size, Execute, Commit);
 }
 
 inline void VirtualFree(void* Ptr, size_t Size) {
   FEXCore::Allocator::munmap(Ptr, Size);
+}
+
+inline void VirtualCommit(void* Ptr, size_t Size) {
+  ::mprotect(Ptr, Size, PROT_READ | PROT_WRITE);
 }
 inline void VirtualDontNeed(void* Ptr, size_t Size, bool Recommit = true) {
   ::madvise(reinterpret_cast<void*>(Ptr), Size, MADV_DONTNEED);

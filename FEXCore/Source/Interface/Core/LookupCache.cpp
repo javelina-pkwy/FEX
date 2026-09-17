@@ -68,6 +68,13 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
     // Start at maximum instead.
     L1PointerMask = MAX_L1_ENTRIES - 1;
   }
+
+  // The page map is indexed by arbitrary guest addresses so it must be fully committed when in use.
+  // The page backing and L1 are committed as they grow.
+  if (!DisableL2Cache()) {
+    FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(PagePointer), PageMemory - PagePointer);
+  }
+  FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(L1Pointer), (L1PointerMask + 1) * sizeof(LookupCacheEntry));
 }
 
 LookupCache::~LookupCache() {

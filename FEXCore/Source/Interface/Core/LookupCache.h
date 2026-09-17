@@ -248,6 +248,10 @@ public:
           // Entries whose address has the new mask bit set would be unreachable by InvalidateCache
           FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(L1Pointer), CurrentL1Entries * sizeof(LookupCacheEntry), false);
 
+          // Commit the new upper half of the L1.
+          FEXCore::Allocator::VirtualCommit(&reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries],
+                                            CurrentL1Entries * sizeof(LookupCacheEntry));
+
           CurrentL1Entries <<= 1;
           L1PointerMask = CurrentL1Entries - 1;
 
@@ -447,6 +451,7 @@ private:
     }
 
     AllocateOffset = NewEnd;
+    FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(PageMemory + NewBase), SIZE_PER_PAGE);
     return PageMemory + NewBase;
   }
 
