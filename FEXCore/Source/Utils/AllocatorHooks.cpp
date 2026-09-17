@@ -27,9 +27,13 @@ using vma_name_hook_type = void (*)(const char* name, const void* address, size_
 #ifdef ENABLE_FEX_ALLOCATOR
 typedef void* (*rp_mmap_hook_type)(size_t size, size_t alignment, size_t* offset, size_t* mapped_size);
 typedef void (*rp_munmap_hook_type)(void* address, size_t offset, size_t mapped_size);
+typedef void (*rp_mcommit_hook_type)(void* address, size_t size);
+typedef void (*rp_mdecommit_hook_type)(void* address, size_t size);
 typedef void (*vma_name_hook_type)(const char* name, const void* address, size_t size);
 extern "C" rp_mmap_hook_type rp_mmap_hook;
 extern "C" rp_munmap_hook_type rp_munmap_hook;
+extern "C" rp_mcommit_hook_type rp_mcommit_hook;
+extern "C" rp_mdecommit_hook_type rp_mdecommit_hook;
 extern "C" vma_name_hook_type rp_name_hook;
 
 #ifndef _WIN32
@@ -163,6 +167,11 @@ static void FEX_rp_memory_decommit(void* address, size_t size) {
   if (madvise(address, size, MADV_DONTNEED)) {
     fprintf(stderr, "Failed to decommit VMA region.");
   }
+
+  // Also drop the protection so the pages stop counting towards RLIMIT_DATA. rpmalloc recommits before reuse.
+  if (mprotect(address, size, PROT_NONE)) {
+    fprintf(stderr, "Failed to protect decommitted VMA region.");
+  }
 }
 
 static void FEX_rp_memory_unmap(void* address, size_t offset, size_t mapped_size) {
@@ -189,8 +198,8 @@ static rpmalloc_interface_t global_interface {
 };
 
 // rpmalloc initializes itself on first use, which happens during static initialization long before
-// InitializeAllocator runs. Once initialized it ignores any later interface, and its own Linux commit
-// callback does nothing. Install our interface first so PROT_NONE reservations get committed.
+// InitializeAllocator runs, and it ignores any interface passed after that. Install ours first so
+// every span, including the ones mapped during startup, is reserved PROT_NONE and committed on demand.
 __attribute__((constructor(101))) static void InitializeAllocatorEarly() {
   const long PageSize = sysconf(_SC_PAGESIZE);
   if (PageSize > 0) {
@@ -204,6 +213,8 @@ void InitializeAllocator(size_t PageSize) {
   rpmalloc_initialize_config(&global_interface, &global_config);
   rp_mmap_hook = FEX_rp_mmap;
   rp_munmap_hook = FEX_rp_memory_unmap;
+  rp_mcommit_hook = FEX_rp_memory_commit;
+  rp_mdecommit_hook = FEX_rp_memory_decommit;
   rp_name_hook = LocalVirtualName;
 }
 #else

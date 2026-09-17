@@ -74,8 +74,11 @@ private:
     uint64_t RegionSize;
   };
 
+  // Activating a reserved region commits a page-tracking bitmap for its full size (one bit per page),
+  // so cap the region size to keep that bitmap small. 64GB of region is 2MB of bitmap.
+  constexpr static uint64_t MaxReservedRegionSize = 64ULL * 1024 * 1024 * 1024; // 64GB
+
   bool MergeReservedRegionIfPossible(ReservedVMARegion* Region, uintptr_t NextPtr, uint64_t NextSize) {
-    constexpr uint64_t MaxReservedRegionSize = 64ULL * 1024 * 1024 * 1024; // 64GB
     uintptr_t RegionEnd = Region->Base + Region->RegionSize;
     uint64_t NewRegionSize = Region->RegionSize + NextSize;
     if (RegionEnd == NextPtr && NewRegionSize <= MaxReservedRegionSize) {
@@ -527,16 +530,21 @@ void OSAllocator_64Bit::AllocateMemoryRegions(fextl::vector<FEXCore::Allocator::
   }
 
   for (auto [Ptr, AllocationSize] : Ranges) {
-    // Skip using any regions that are <= two pages. FEX's VMA allocator requires two pages
-    // for tracking data. So three pages are minimum for a single page VMA allocation.
-    if (AllocationSize <= (FEXCore::Utils::FEX_PAGE_SIZE * 2)) {
-      continue;
-    }
+    // Split large ranges in to regions of at most MaxReservedRegionSize.
+    for (uint64_t Offset = 0; Offset < AllocationSize; Offset += MaxReservedRegionSize) {
+      const uint64_t RegionSize = std::min(AllocationSize - Offset, MaxReservedRegionSize);
 
-    ReservedVMARegion* Region = ObjectAlloc->new_construct<ReservedVMARegion>();
-    Region->Base = reinterpret_cast<uint64_t>(Ptr);
-    Region->RegionSize = AllocationSize;
-    ReservedRegions->emplace_back(Region);
+      // Skip using any regions that are <= two pages. FEX's VMA allocator requires two pages
+      // for tracking data. So three pages are minimum for a single page VMA allocation.
+      if (RegionSize <= (FEXCore::Utils::FEX_PAGE_SIZE * 2)) {
+        continue;
+      }
+
+      ReservedVMARegion* Region = ObjectAlloc->new_construct<ReservedVMARegion>();
+      Region->Base = reinterpret_cast<uint64_t>(Ptr) + Offset;
+      Region->RegionSize = RegionSize;
+      ReservedRegions->emplace_back(Region);
+    }
   }
 }
 
