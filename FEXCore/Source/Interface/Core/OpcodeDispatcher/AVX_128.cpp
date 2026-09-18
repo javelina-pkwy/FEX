@@ -113,6 +113,7 @@ void OpDispatchBuilder::AVX128_StoreResult_WithOpSize(FEXCore::X86Tables::Decode
 
 Ref OpDispatchBuilder::AVX128_LoadXMMRegister(uint32_t XMM, bool High) {
   if (High) {
+    CurrentHeader->UsesAVXHigh = true;
     return LoadContext(AVXHigh0Index + XMM);
   } else {
     return LoadXMMRegister(XMM);
@@ -121,6 +122,7 @@ Ref OpDispatchBuilder::AVX128_LoadXMMRegister(uint32_t XMM, bool High) {
 
 void OpDispatchBuilder::AVX128_StoreXMMRegister(uint32_t XMM, const Ref Src, bool High) {
   if (High) {
+    CurrentHeader->UsesAVXHigh = true;
     StoreContext(AVXHigh0Index + XMM, Src);
   } else {
     StoreXMMRegister(XMM, Src);
@@ -328,6 +330,7 @@ void OpDispatchBuilder::AVX128_VZERO(OpcodeArgs) {
   const auto DstSize = GetDstSize(Op);
   const auto IsVZEROALL = DstSize == Core::CPUState::XMM_AVX_REG_SIZE;
   const auto NumRegs = Is64BitMode ? 16U : 8U;
+  CurrentHeader->UsesAVXHigh = true;
 
   if (IsVZEROALL) {
     // NOTE: Despite the name being VZEROALL, this will still only ever
