@@ -416,7 +416,9 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FYL2X(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FYL2X(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -432,8 +434,32 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    auto Src1_d = Canonical(lhs).ToFMax(state);
-    auto Src2_d = Canonical(rhs).ToFMax(state);
+    // ST(1) * log2(ST(0)) special cases: NaNs propagate; log2 of a negative number is invalid; log2(0)
+    // is -inf (zero-divide) and flips with the sign of ST(1) unless ST(1) is also zero, which is
+    // invalid; log2(+inf) is +inf unless ST(1) is zero; and inf * log2(1) = inf * 0 is invalid.
+    // cephes clamps log2 of 0/inf/NaN to +-16384 instead, so these must be handled here.
+    if (IsNan(lhs) || IsNan(rhs)) {
+      return extF80_add(state, lhs, rhs);
+    }
+    const bool XZero = lhs.Top.Exponent == 0 && lhs.Significand == 0;
+    const bool YZero = rhs.Top.Exponent == 0 && rhs.Significand == 0;
+    const bool XInf = lhs.Top.Exponent == 0x7FFF;
+    const bool YInf = rhs.Top.Exponent == 0x7FFF;
+    const bool XOne = lhs.Top.Exponent == ExponentBias && lhs.Significand == IntegerBit;
+    if ((lhs.Top.Sign && !XZero) || (XZero && YZero) || (XInf && YZero) || (XOne && YInf)) {
+      state->exceptionFlags |= softfloat_flag_invalid;
+      return Indefinite();
+    }
+    if (XZero) {
+      state->exceptionFlags |= softfloat_flag_infinite;
+      return X80SoftFloat(!rhs.Top.Sign, 0x7FFF, IntegerBit);
+    }
+    if (XInf) {
+      return X80SoftFloat(rhs.Top.Sign, 0x7FFF, IntegerBit);
+    }
+
+    auto Src1_d = lhs.ToFMax(state);
+    auto Src2_d = rhs.ToFMax(state);
 
     auto Tmp = f128_mul(state, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
     return X80SoftFloat(state, Tmp);
