@@ -274,6 +274,12 @@ private:
   // Update Top value in slow path for a pop
   void UpdateTopForPop_Slow(bool InvalidateTag = true);
   void UpdateTopForPush_Slow();
+  // x87 stack overflow: a push into a slot that still holds a value (full precision mode only).
+  Ref PushOverflow();
+  Ref SelectIndefinite(Ref Overflow, Ref Value);
+  void RecordPushOverflow(Ref Overflow);
+  Ref ApplyPushOverflow(Ref Overflow, Ref Value);
+  void ClearC2OnOverflow(Ref Overflow);
   // Synchronizes the current simulated stack with the actual values.
   // Returns a new value for Top, that's synchronized between the simulated stack
   // and the actual FPU stack.
@@ -609,6 +615,61 @@ inline void X87StackOptimization::UpdateTopForPush_Slow() {
   FlushTopPending = true;
 }
 
+// Returns 1 when the slot the next push lands in (virtual ST(7)) still holds a value and 0 otherwise,
+// or nullptr when that is statically impossible or not modelled (reduced precision mode).
+inline Ref X87StackOptimization::PushOverflow() {
+  if (ReducedPrecisionMode) {
+    return nullptr;
+  }
+  if (SlowPath) {
+    return TopValidCache[7] == StackSlot::INVALID ? nullptr : GetX87ValidTag_Slow(7);
+  }
+  const auto& [Valid, StackMember] = StackData.top(7);
+  if (Valid == StackSlot::INVALID) {
+    return nullptr;
+  }
+  if (Valid == StackSlot::VALID) {
+    return GetConstant(1);
+  }
+  // Untouched in this block, so its tag in the context is current. Virtual ST(7) is physical slot
+  // TOP - TopOffset + 7.
+  Ref Slot = GetOffsetTopWithCache_Slow((7 - StackData.TopOffset) & 7);
+  return IREmit->_And(OpSize::i32Bit, IREmit->_Lshr(OpSize::i32Bit, GetFTW(), Slot), GetConstant(1));
+}
+
+inline Ref X87StackOptimization::SelectIndefinite(Ref Overflow, Ref Value) {
+  Ref Mask = IREmit->_VDupFromGPR(OpSize::i128Bit, OpSize::i64Bit, IREmit->_Sub(OpSize::i64Bit, GetConstant(0), Overflow));
+  Ref Indefinite =
+    IREmit->_VInsGPR(OpSize::i128Bit, OpSize::i64Bit, 1,
+                     IREmit->_VCastFromGPR(OpSize::i128Bit, OpSize::i64Bit, IREmit->_Constant(0xC000000000000000ULL)), GetConstant(0xFFFF));
+  return IREmit->_VBSL(OpSize::i128Bit, Mask, Indefinite, Value);
+}
+
+// A masked stack overflow raises IE and SF and sets C1; a successful push clears C1.
+inline void X87StackOptimization::RecordPushOverflow(Ref Overflow) {
+  const auto Flag = [](unsigned Loc) {
+    return offsetof(FEXCore::Core::CPUState, flags) + Loc;
+  };
+  for (unsigned Loc : {FEXCore::X86State::X87FLAG_IE_LOC, FEXCore::X86State::X87FLAG_SF_LOC}) {
+    Ref Old = IREmit->_LoadContextGPR(OpSize::i8Bit, Flag(Loc));
+    IREmit->_StoreContextGPR(OpSize::i8Bit, IREmit->_Or(OpSize::i32Bit, Old, Overflow), Flag(Loc));
+  }
+  IREmit->_StoreContextGPR(OpSize::i8Bit, Overflow, Flag(FEXCore::X86State::X87FLAG_C1_LOC));
+}
+
+inline Ref X87StackOptimization::ApplyPushOverflow(Ref Overflow, Ref Value) {
+  RecordPushOverflow(Overflow);
+  return SelectIndefinite(Overflow, Value);
+}
+
+// The transcendental pushes report an out-of-range argument through C2, which a faulting instruction
+// never evaluates.
+inline void X87StackOptimization::ClearC2OnOverflow(Ref Overflow) {
+  const auto C2 = offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_C2_LOC;
+  Ref Old = IREmit->_LoadContextGPR(OpSize::i8Bit, C2);
+  IREmit->_StoreContextGPR(OpSize::i8Bit, IREmit->_And(OpSize::i32Bit, Old, IREmit->_Xor(OpSize::i32Bit, Overflow, GetConstant(1))), C2);
+}
+
 void X87StackOptimization::FlushCachedRegs() {
   if (FlushTopPending) {
     IREmit->_StoreContextGPR(OpSize::i8Bit, TopOffsetCache[0], offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_TOP_LOC);
@@ -864,6 +925,13 @@ void X87StackOptimization::Run(IREmitter* Emit) {
           OneConst = IREmit->_LoadNamedVectorConstant(OpSize::i128Bit, NamedVectorConstant::NAMED_VECTOR_X87_ONE);
         }
 
+        // A faulting push turns both results into the indefinite and skips the argument range check.
+        if (Ref Overflow = PushOverflow()) {
+          StoreStackValue(SelectIndefinite(Overflow, LoadStackValue()));
+          OneConst = ApplyPushOverflow(Overflow, OneConst);
+          ClearC2OnOverflow(Overflow);
+        }
+
         if (SlowPath) {
           UpdateTopForPush_Slow();
           StoreStackValueAtOffset_Slow(OneConst);
@@ -893,6 +961,13 @@ void X87StackOptimization::Run(IREmitter* Emit) {
           SinValue = IREmit->_AllocateFPR(OpSize::i128Bit, OpSize::i128Bit);
           CosValue = IREmit->_AllocateFPR(OpSize::i128Bit, OpSize::i128Bit);
           IREmit->_F80SINCOS(St0, SinValue, CosValue);
+        }
+
+        // A faulting push turns both results into the indefinite and skips the argument range check.
+        if (Ref Overflow = PushOverflow()) {
+          SinValue = SelectIndefinite(Overflow, SinValue);
+          CosValue = ApplyPushOverflow(Overflow, CosValue);
+          ClearC2OnOverflow(Overflow);
         }
 
         // Push values
@@ -938,13 +1013,17 @@ void X87StackOptimization::Run(IREmitter* Emit) {
 
       case OP_PUSHSTACK: {
         const auto* Op = IROp->C<IROp_PushStack>();
-        auto* SourceNode = CurrentIR.GetNode(Op->X80Src);
+        Ref SourceNode = CurrentIR.GetNode(Op->X80Src);
+        Ref Overflow = PushOverflow();
+        if (Overflow) {
+          SourceNode = ApplyPushOverflow(Overflow, SourceNode);
+        }
 
         if (SlowPath) {
           UpdateTopForPush_Slow();
           StoreStackValueAtOffset_Slow(SourceNode);
         } else {
-          if (Op->OriginalValue.IsInvalid()) {
+          if (Overflow || Op->OriginalValue.IsInvalid()) {
             // No original value to track - just push the converted data
             StackData.push(StackMemberInfo {SourceNode});
           } else {
@@ -959,11 +1038,17 @@ void X87StackOptimization::Run(IREmitter* Emit) {
         const auto* Op = IROp->C<IROp_CopyPushStack>();
         auto Offset = Op->StackLocation;
         auto Value = MigrateToSlowPath_IfInvalid(Offset);
+        Ref Overflow = PushOverflow();
 
         if (SlowPath) {
           Ref St0 = LoadStackValueAtOffset_Slow(Offset);
+          if (Overflow) {
+            St0 = ApplyPushOverflow(Overflow, St0);
+          }
           UpdateTopForPush_Slow();
           StoreStackValueAtOffset_Slow(St0);
+        } else if (Overflow) {
+          StackData.push(StackMemberInfo {ApplyPushOverflow(Overflow, Value->StackDataNode)});
         } else {
           StackData.push(*Value);
         }

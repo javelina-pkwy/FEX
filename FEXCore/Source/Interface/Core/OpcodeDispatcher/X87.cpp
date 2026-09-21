@@ -1007,10 +1007,24 @@ void OpDispatchBuilder::X87FXAM(OpcodeArgs) {
 
 void OpDispatchBuilder::X87FXTRACT(OpcodeArgs) {
   auto Top = _ReadStackValue(0);
+  // Net push of one: the instruction overflows the stack when ST(7) still holds a value, and then both
+  // results are the indefinite QNaN. The stack pass handles the second push the same way; this covers
+  // the first.
+  auto Overflow = _StackValidTag(7);
 
   _PopStackDestroy();
-  auto Exp = _F80XTRACT_EXP(Top);
-  auto Sig = _F80XTRACT_SIG(Top);
+  Ref Exp = _F80XTRACT_EXP(Top);
+  Ref Sig = _F80XTRACT_SIG(Top);
+
+  auto Mask = _VDupFromGPR(OpSize::i128Bit, OpSize::i64Bit, _Sub(OpSize::i64Bit, Constant(0), Overflow));
+  auto Indefinite = _VInsGPR(OpSize::i128Bit, OpSize::i64Bit, 1,
+                             _VCastFromGPR(OpSize::i128Bit, OpSize::i64Bit, Constant(0xC000000000000000ULL)), Constant(0xFFFF));
+  Exp = _VBSL(OpSize::i128Bit, Mask, Indefinite, Exp);
+  Sig = _VBSL(OpSize::i128Bit, Mask, Indefinite, Sig);
+  SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(_Or(OpSize::i32Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), Overflow));
+  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(_Or(OpSize::i32Bit, GetRFLAG(FEXCore::X86State::X87FLAG_SF_LOC), Overflow));
+  SetRFLAG<FEXCore::X86State::X87FLAG_C1_LOC>(Overflow);
+
   _PushStack(Exp, Invalid(), OpSize::iInvalid);
   _PushStack(Sig, Invalid(), OpSize::iInvalid);
   StoreX87FIP(Op);
