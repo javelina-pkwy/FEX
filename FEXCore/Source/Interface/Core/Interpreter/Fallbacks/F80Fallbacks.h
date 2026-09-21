@@ -36,11 +36,18 @@ FEXCORE_PRESERVE_ALL_ATTR static softfloat_state SoftFloatStateFromFCW(uint16_t 
   return State;
 }
 
+// The x87 exception flags are sticky: OR in whatever softfloat raised.
 FEXCORE_PRESERVE_ALL_ATTR static void HandleX87Exception(const softfloat_state& State, FEXCore::Core::CpuStateFrame* Frame) {
-  // Check for Invalid Operation exception (bit 0 of X87 status word)
-  if (State.exceptionFlags & softfloat_flag_invalid) {
-    Frame->State.flags[FEXCore::X86State::X87FLAG_IE_LOC] = 1;
-  }
+  const auto Raise = [&](uint8_t Flag, unsigned Loc) {
+    if (State.exceptionFlags & Flag) {
+      Frame->State.flags[Loc] = 1;
+    }
+  };
+  Raise(softfloat_flag_invalid, FEXCore::X86State::X87FLAG_IE_LOC);
+  Raise(softfloat_flag_infinite, FEXCore::X86State::X87FLAG_ZE_LOC);
+  Raise(softfloat_flag_overflow, FEXCore::X86State::X87FLAG_OE_LOC);
+  Raise(softfloat_flag_underflow, FEXCore::X86State::X87FLAG_UE_LOC);
+  Raise(softfloat_flag_inexact, FEXCore::X86State::X87FLAG_PE_LOC);
 }
 
 // Wrapper for SoftFloat state to handle X87 exceptions
@@ -61,23 +68,28 @@ public:
   ScopedSoftFloatState& operator=(ScopedSoftFloatState&&) = delete;
 
   softfloat_state State;
-
-private:
   FEXCore::Core::CpuStateFrame* Frame;
 };
 
 // The x87 raises #IA for pseudo-NaN, pseudo-infinity and unnormal operands instead of computing
-// with them; the masked result is the QNaN indefinite.
-FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(softfloat_state* State, const X80SoftFloat& Src) {
-  if (!X80SoftFloat::IsUnsupported(Src)) {
-    return false;
+// with them; the masked result is the QNaN indefinite. Otherwise a denormal or pseudo-denormal
+// operand raises #D (invalid operands take precedence, as on hardware).
+FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(ScopedSoftFloatState& State, const X80SoftFloat& Src1, const X80SoftFloat* Src2 = nullptr) {
+  const auto Denormal = [](const X80SoftFloat& Src) {
+    return Src.Top.Exponent == 0 && Src.Significand != 0;
+  };
+  if (X80SoftFloat::IsUnsupported(Src1) || (Src2 && X80SoftFloat::IsUnsupported(*Src2))) {
+    State.State.exceptionFlags |= softfloat_flag_invalid;
+    return true;
   }
-  State->exceptionFlags |= softfloat_flag_invalid;
-  return true;
+  if (Denormal(Src1) || (Src2 && Denormal(*Src2))) {
+    State.Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] = 1;
+  }
+  return false;
 }
 
-FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(softfloat_state* State, const X80SoftFloat& Src1, const X80SoftFloat& Src2) {
-  return InvalidOperand(State, Src1) | InvalidOperand(State, Src2);
+FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(ScopedSoftFloatState& State, const X80SoftFloat& Src1, const X80SoftFloat& Src2) {
+  return InvalidOperand(State, Src1, &Src2);
 }
 
 // The trigonometric instructions report an argument of 2^63 or more through C2 and leave ST(0)
@@ -104,12 +116,21 @@ struct OpHandlers<IR::OP_F80CVTTO> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle4(uint16_t FCW, float src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
+    // Loading a denormal single or double raises #D.
+    const auto Bits = std::bit_cast<uint32_t>(src);
+    if ((Bits & 0x7F800000U) == 0 && (Bits & 0x007FFFFFU) != 0) {
+      Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] = 1;
+    }
     return X80SoftFloat(&State.State, src);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle8(uint16_t FCW, double src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
+    const auto Bits = std::bit_cast<uint64_t>(src);
+    if ((Bits & 0x7FF0000000000000ULL) == 0 && (Bits & 0x000FFFFFFFFFFFFFULL) != 0) {
+      Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] = 1;
+    }
     return X80SoftFloat(&State.State, src);
   }
 };
@@ -123,7 +144,7 @@ struct OpHandlers<IR::OP_F80CMP> {
     bool eq, lt, nan;
     uint64_t ResultFlags = 0;
 
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return 1 << IR::FCMP_FLAG_UNORDERED;
     }
 
@@ -220,7 +241,7 @@ struct OpHandlers<IR::OP_F80ROUND> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FRNDINT(&State.State, Src1);
@@ -232,7 +253,7 @@ struct OpHandlers<IR::OP_F80F2XM1> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::F2XM1(&State.State, Src1);
@@ -244,7 +265,7 @@ struct OpHandlers<IR::OP_F80TAN> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     if (OutOfTrigRange(Src1, Frame)) {
@@ -259,7 +280,7 @@ struct OpHandlers<IR::OP_F80SQRT> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FSQRT(&State.State, Src1);
@@ -271,7 +292,7 @@ struct OpHandlers<IR::OP_F80SIN> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     if (OutOfTrigRange(Src1, Frame)) {
@@ -286,7 +307,7 @@ struct OpHandlers<IR::OP_F80COS> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     if (OutOfTrigRange(Src1, Frame)) {
@@ -301,7 +322,7 @@ struct OpHandlers<IR::OP_F80SINCOS> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegPairType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return FEXCore::MakeVectorRegPair(X80SoftFloat::Indefinite(), X80SoftFloat::Indefinite());
     }
     // Hardware pushes nothing in this case; the extra stack slot the dispatcher allocates is left
@@ -318,7 +339,7 @@ struct OpHandlers<IR::OP_F80XTRACT_EXP> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FXTRACT_EXP(Src1);
@@ -330,7 +351,7 @@ struct OpHandlers<IR::OP_F80XTRACT_SIG> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1)) {
+    if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FXTRACT_SIG(Src1);
@@ -342,7 +363,7 @@ struct OpHandlers<IR::OP_F80ADD> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FADD(&State.State, Src1, Src2);
@@ -354,7 +375,7 @@ struct OpHandlers<IR::OP_F80SUB> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FSUB(&State.State, Src1, Src2);
@@ -366,7 +387,7 @@ struct OpHandlers<IR::OP_F80MUL> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FMUL(&State.State, Src1, Src2);
@@ -378,7 +399,7 @@ struct OpHandlers<IR::OP_F80DIV> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FDIV(&State.State, Src1, Src2);
@@ -390,7 +411,7 @@ struct OpHandlers<IR::OP_F80FYL2X> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FYL2X(&State.State, Src1, Src2);
@@ -402,7 +423,7 @@ struct OpHandlers<IR::OP_F80FYL2XP1> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FYL2XP1(&State.State, Src1, Src2);
@@ -414,7 +435,7 @@ struct OpHandlers<IR::OP_F80ATAN> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FATAN(&State.State, Src1, Src2);
@@ -426,7 +447,7 @@ struct OpHandlers<IR::OP_F80FPREM1> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     bool Partial = false;
@@ -442,7 +463,7 @@ struct OpHandlers<IR::OP_F80FPREM> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     bool Partial = false;
@@ -458,7 +479,7 @@ struct OpHandlers<IR::OP_F80SCALE> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle(uint16_t FCW, VectorRegType Src1, VectorRegType Src2, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame, true};
-    if (InvalidOperand(&State.State, Src1, Src2)) {
+    if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
     return X80SoftFloat::FSCALE(&State.State, Src1, Src2);

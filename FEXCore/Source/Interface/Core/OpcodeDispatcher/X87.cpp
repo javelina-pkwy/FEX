@@ -450,6 +450,12 @@ Ref OpDispatchBuilder::ReconstructX87StateFromFSW_Helper(Ref FSW) {
   SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(C2);
   SetRFLAG<FEXCore::X86State::X87FLAG_C3_LOC>(C3);
   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(IE);
+  SetRFLAG<FEXCore::X86State::X87FLAG_DE_LOC>(_Bfe(OpSize::i32Bit, 1, 1, FSW));
+  SetRFLAG<FEXCore::X86State::X87FLAG_ZE_LOC>(_Bfe(OpSize::i32Bit, 1, 2, FSW));
+  SetRFLAG<FEXCore::X86State::X87FLAG_OE_LOC>(_Bfe(OpSize::i32Bit, 1, 3, FSW));
+  SetRFLAG<FEXCore::X86State::X87FLAG_UE_LOC>(_Bfe(OpSize::i32Bit, 1, 4, FSW));
+  SetRFLAG<FEXCore::X86State::X87FLAG_PE_LOC>(_Bfe(OpSize::i32Bit, 1, 5, FSW));
+  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(_Bfe(OpSize::i32Bit, 1, 6, FSW));
   return Top;
 }
 
@@ -798,6 +804,21 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
   auto IE = GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC);
   FSW = _Or(OpSize::i64Bit, FSW, IE);
 
+  // Exception flags DE..PE at bits 1..5 and the stack fault flag at bit 6.
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_DE_LOC), 1);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_ZE_LOC), 2);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_OE_LOC), 3);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_UE_LOC), 4);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_PE_LOC), 5);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, GetRFLAG(FEXCore::X86State::X87FLAG_SF_LOC), 6);
+
+  // ES (bit 7) and B (bit 15) summarize the exception flags the control word leaves unmasked.
+  auto FCW = _LoadContextGPR(OpSize::i16Bit, offsetof(FEXCore::Core::CPUState, FCW));
+  auto Pending = _Andn(OpSize::i32Bit, _And(OpSize::i32Bit, FSW, Constant(0x3F)), FCW);
+  auto ES = Select01(OpSize::i32Bit, CondClass::NEQ, Pending, Constant(0));
+  FSW = _Orlshl(OpSize::i64Bit, FSW, ES, 7);
+  FSW = _Orlshl(OpSize::i64Bit, FSW, ES, 15);
+
   return FSW;
 }
 
@@ -815,8 +836,15 @@ void OpDispatchBuilder::X87FNSTSW(OpcodeArgs, bool DestRAX) {
 }
 
 void OpDispatchBuilder::FNCLEX(OpcodeArgs) {
-  // Clear the exception flag bit
-  SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(_Constant(0));
+  // Clear the exception and stack fault flags (ES and B are derived from them).
+  auto Zero = _Constant(0);
+  SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_DE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_ZE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_OE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_UE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_PE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(Zero);
 }
 
 void OpDispatchBuilder::FNINIT(OpcodeArgs) {
@@ -845,6 +873,12 @@ void OpDispatchBuilder::FNINIT(OpcodeArgs) {
   SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(Zero);
   SetRFLAG<FEXCore::X86State::X87FLAG_C3_LOC>(Zero);
   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_DE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_ZE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_OE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_UE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_PE_LOC>(Zero);
+  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(Zero);
 
   // fninit resets the FIP.
   _StoreContextGPR(OpSize::i64Bit, _Constant(0), offsetof(FEXCore::Core::CPUState, FIP));
