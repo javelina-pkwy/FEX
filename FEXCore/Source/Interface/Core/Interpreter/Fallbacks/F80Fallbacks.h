@@ -11,6 +11,7 @@
 namespace FEXCore::CPU {
 FEXCORE_PRESERVE_ALL_ATTR static softfloat_state SoftFloatStateFromFCW(uint16_t FCW, bool Force80BitPrecision = false) {
   softfloat_state State {};
+  // The x87 detects tininess after rounding (verified against hardware).
   State.detectTininess = softfloat_tininess_afterRounding;
   State.exceptionFlags = 0;
   State.roundingPrecision = 80;

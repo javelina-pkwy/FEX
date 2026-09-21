@@ -497,8 +497,9 @@ struct FEX_PACKED X80SoftFloat {
     auto Src1_d = lhs.ToFMax(state);
     auto Src2_d = rhs.ToFMax(state);
 
-    softfloat_state Scratch = *state;
-    auto Tmp = f128_mul(&Scratch, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
+    // The final product runs on the real state so that an underflow to zero inside binary128 is
+    // still reported.
+    auto Tmp = f128_mul(state, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
     return MarkInexact(state, FromF128Result(state, Tmp));
 #endif
   }
@@ -553,7 +554,9 @@ struct FEX_PACKED X80SoftFloat {
     } else {
       Log = f128_mul(&Scratch, FEXCore::cephes_128bit::log2l(U), f128_div(&Scratch, X, f128_sub(&Scratch, U, one)));
     }
-    return MarkInexact(state, FromF128Result(state, f128_mul(&Scratch, rhs.ToFMax(state), Log)));
+    // The final product runs on the real state so that an underflow to zero inside binary128 is
+    // still reported.
+    return MarkInexact(state, FromF128Result(state, f128_mul(state, rhs.ToFMax(state), Log)));
   }
 
   // Not preserve_all for the same reason as FYL2XP1.
@@ -602,6 +605,20 @@ struct FEX_PACKED X80SoftFloat {
     }
     if (XZero || YInf) {
       return FromF128(state, HalfPi_128, YNegative);
+    }
+
+    // For a tiny |y/x| with x > 0, atan(r) = r(1 - r^2/3) with the cubic term far below precision:
+    // round the ratio of the normalized operands toward zero at its true scale in one step. This also
+    // covers denormal operands, which cephes would flush.
+    if (!XNegative) {
+      int32_t ShiftY = 0;
+      int32_t ShiftX = 0;
+      const float128_t UnitY = NormalizeToUnit(lhs, &ShiftY);
+      const float128_t UnitX = NormalizeToUnit(rhs, &ShiftX);
+      if (ShiftY - ShiftX < -64) {
+        softfloat_state Scratch = *state;
+        return MarkInexact(state, FromF128Scaled(state, NudgeTowardZero(f128_div(&Scratch, UnitY, UnitX)), ShiftY - ShiftX));
+      }
     }
 
     BIGFLOAT Src1_d = lhs.ToFMax(state);
@@ -957,8 +974,37 @@ private:
     const bool Zero = Result.Top.Exponent == 0 && Result.Significand == 0;
     if (!Zero && Result.Top.Exponent != 0x7FFF) {
       state->exceptionFlags |= softfloat_flag_inexact;
+      // An inexact tiny result is an underflow as well.
+      if (Result.Top.Exponent == 0) {
+        state->exceptionFlags |= softfloat_flag_underflow;
+      }
     }
     return Result;
+  }
+
+  // Value = Unit * 2^Shift with Unit in [1, 2) as a normal binary128. cephes flushes binary128
+  // denormals, so operands below 2^-16382 are evaluated in this normalized form instead.
+  static float128_t NormalizeToUnit(const X80SoftFloat& Value, int32_t* Shift) {
+    uint64_t Sig = Value.Significand;
+    int32_t Exp = Value.Top.Exponent ? Value.Top.Exponent : 1;
+    const int LeadingZeros = std::countl_zero(Sig);
+    Sig <<= LeadingZeros;
+    Exp -= LeadingZeros;
+    *Shift = Exp - ExponentBias;
+    softfloat_state Exact {};
+    return X80SoftFloat(Value.Top.Sign, ExponentBias, Sig).ToFMax(&Exact);
+  }
+
+  // Rounds Value * 2^Shift to 80 bits in a single step for a finite normal binary128 Value, so a
+  // result in the denormal range or beyond the exponent range rounds exactly once.
+  static X80SoftFloat FromF128Scaled(softfloat_state* state, float128_t Value, int32_t Shift) {
+    const bool Sign = Value.v[1] >> 63;
+    const int32_t Exp = (Value.v[1] >> 48) & 0x7FFF;
+    const unsigned __int128 Mantissa = (static_cast<unsigned __int128>((Value.v[1] & 0xFFFFFFFFFFFFULL) | (1ULL << 48)) << 64) | Value.v[0];
+    // 113 significant bits moved to the top of 128 so that sig carries the leading 64.
+    const unsigned __int128 Shifted = Mantissa << 15;
+    return softfloat_normRoundPackToExtF80(state, Sign, Exp + Shift, static_cast<uint64_t>(Shifted >> 64), static_cast<uint64_t>(Shifted),
+                                           state->roundingPrecision);
   }
 
   // Moves a finite non-zero binary128 value one ulp toward +inf or -inf. When a transcendental
