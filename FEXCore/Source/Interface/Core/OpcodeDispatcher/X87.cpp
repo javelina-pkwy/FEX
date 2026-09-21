@@ -1046,9 +1046,23 @@ void OpDispatchBuilder::X87FXTRACT(OpcodeArgs) {
   // the first.
   auto Overflow = _StackValidTag(7);
 
+  // A faulting instruction raises none of the computation's flags: snapshot them and keep the
+  // snapshot where it faults.
+  const unsigned ExceptionFlags[] = {FEXCore::X86State::X87FLAG_DE_LOC, FEXCore::X86State::X87FLAG_ZE_LOC, FEXCore::X86State::X87FLAG_OE_LOC,
+                                     FEXCore::X86State::X87FLAG_UE_LOC, FEXCore::X86State::X87FLAG_PE_LOC};
+  Ref SavedFlags[5];
+  for (size_t i = 0; i < 5; ++i) {
+    SavedFlags[i] = GetRFLAG(ExceptionFlags[i]);
+  }
+
   _PopStackDestroy();
   Ref Exp = _F80XTRACT_EXP(Top);
   Ref Sig = _F80XTRACT_SIG(Top);
+
+  for (size_t i = 0; i < 5; ++i) {
+    SetRFLAG(_Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::NEQ, Overflow, Constant(0), SavedFlags[i], GetRFLAG(ExceptionFlags[i])),
+             ExceptionFlags[i]);
+  }
 
   auto Mask = _VDupFromGPR(OpSize::i128Bit, OpSize::i64Bit, _Sub(OpSize::i64Bit, Constant(0), Overflow));
   auto Indefinite = _VInsGPR(OpSize::i128Bit, OpSize::i64Bit, 1,

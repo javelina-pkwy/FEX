@@ -280,6 +280,10 @@ private:
   void RecordPushOverflow(Ref Overflow);
   Ref ApplyPushOverflow(Ref Overflow, Ref Value);
   void ClearC2OnOverflow(Ref Overflow);
+  // A faulting instruction never evaluates its operands, so flags the computation raised must not
+  // stick: snapshot them before it and restore the snapshot where Overflow is set.
+  std::array<Ref, 5> SaveExceptionFlags();
+  void RestoreExceptionFlagsOnOverflow(Ref Overflow, const std::array<Ref, 5>& Saved);
   // Synchronizes the current simulated stack with the actual values.
   // Returns a new value for Top, that's synchronized between the simulated stack
   // and the actual FPU stack.
@@ -670,6 +674,28 @@ inline void X87StackOptimization::ClearC2OnOverflow(Ref Overflow) {
   IREmit->_StoreContextGPR(OpSize::i8Bit, IREmit->_And(OpSize::i32Bit, Old, IREmit->_Xor(OpSize::i32Bit, Overflow, GetConstant(1))), C2);
 }
 
+static constexpr std::array<unsigned, 5> ExceptionFlagLocs = {
+  FEXCore::X86State::X87FLAG_DE_LOC, FEXCore::X86State::X87FLAG_ZE_LOC, FEXCore::X86State::X87FLAG_OE_LOC,
+  FEXCore::X86State::X87FLAG_UE_LOC, FEXCore::X86State::X87FLAG_PE_LOC,
+};
+
+inline std::array<Ref, 5> X87StackOptimization::SaveExceptionFlags() {
+  std::array<Ref, 5> Saved {};
+  for (size_t i = 0; i < Saved.size(); ++i) {
+    Saved[i] = IREmit->_LoadContextGPR(OpSize::i8Bit, offsetof(FEXCore::Core::CPUState, flags) + ExceptionFlagLocs[i]);
+  }
+  return Saved;
+}
+
+inline void X87StackOptimization::RestoreExceptionFlagsOnOverflow(Ref Overflow, const std::array<Ref, 5>& Saved) {
+  for (size_t i = 0; i < Saved.size(); ++i) {
+    const auto Offset = offsetof(FEXCore::Core::CPUState, flags) + ExceptionFlagLocs[i];
+    Ref Current = IREmit->_LoadContextGPR(OpSize::i8Bit, Offset);
+    Ref Kept = IREmit->_Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::NEQ, Overflow, GetConstant(0), Saved[i], Current);
+    IREmit->_StoreContextGPR(OpSize::i8Bit, Kept, Offset);
+  }
+}
+
 void X87StackOptimization::FlushCachedRegs() {
   if (FlushTopPending) {
     IREmit->_StoreContextGPR(OpSize::i8Bit, TopOffsetCache[0], offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_TOP_LOC);
@@ -917,6 +943,7 @@ void X87StackOptimization::Run(IREmitter* Emit) {
 
 
       case OP_F80PTANSTACK: {
+        const auto SavedFlags = SaveExceptionFlags();
         HandleUnop(OP_F64TAN, false, OP_F80TAN);
         Ref OneConst {};
         if (ReducedPrecisionMode) {
@@ -925,11 +952,13 @@ void X87StackOptimization::Run(IREmitter* Emit) {
           OneConst = IREmit->_LoadNamedVectorConstant(OpSize::i128Bit, NamedVectorConstant::NAMED_VECTOR_X87_ONE);
         }
 
-        // A faulting push turns both results into the indefinite and skips the argument range check.
+        // A faulting push turns both results into the indefinite, skips the argument range check and
+        // raises none of the computation's flags.
         if (Ref Overflow = PushOverflow()) {
           StoreStackValue(SelectIndefinite(Overflow, LoadStackValue()));
           OneConst = ApplyPushOverflow(Overflow, OneConst);
           ClearC2OnOverflow(Overflow);
+          RestoreExceptionFlagsOnOverflow(Overflow, SavedFlags);
         }
 
         if (SlowPath) {
@@ -943,6 +972,7 @@ void X87StackOptimization::Run(IREmitter* Emit) {
 
       case OP_F80SINCOSSTACK: {
         Ref St0 = LoadStackValue();
+        const auto SavedFlags = SaveExceptionFlags();
 
         Ref SinValue {};
         Ref CosValue {};
@@ -968,6 +998,7 @@ void X87StackOptimization::Run(IREmitter* Emit) {
           SinValue = SelectIndefinite(Overflow, SinValue);
           CosValue = ApplyPushOverflow(Overflow, CosValue);
           ClearC2OnOverflow(Overflow);
+          RestoreExceptionFlagsOnOverflow(Overflow, SavedFlags);
         }
 
         // Push values
