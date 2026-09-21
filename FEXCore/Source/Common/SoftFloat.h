@@ -417,6 +417,11 @@ struct FEX_PACKED X80SoftFloat {
     if (lhs.Top.Exponent == 0x7FFF) {
       return lhs.Top.Sign ? X80SoftFloat(1, 0x3FFF, 0x8000000000000000ULL) : lhs;
     }
+    // Outside [-1, 1] the SDM leaves the result undefined; the AMD hardware used as reference returns
+    // the argument unchanged and reports it inexact.
+    if (lhs.Top.Exponent > ExponentBias || (lhs.Top.Exponent == ExponentBias && lhs.Significand != IntegerBit)) {
+      return MarkInexact(state, lhs);
+    }
 
     auto Src1_d = Canonical(lhs).ToFMax(state);
     static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
@@ -524,19 +529,26 @@ struct FEX_PACKED X80SoftFloat {
     const bool YZero = rhs.Top.Exponent == 0 && rhs.Significand == 0;
     const bool XInf = lhs.Top.Exponent == 0x7FFF;
     const bool YInf = rhs.Top.Exponent == 0x7FFF;
-    const X80SoftFloat MinusOne(1, ExponentBias, IntegerBit);
-    const bool XMinusOne = extF80_eq(state, lhs, MinusOne);
     const uint16_t ResultSign = lhs.Top.Sign ^ rhs.Top.Sign;
-    if ((XZero && YInf) || ((XInf || XMinusOne) && YZero) || extF80_lt(state, lhs, MinusOne)) {
+    // ST(0) <= -1 is outside the defined range. The AMD hardware used as reference returns ST(0)
+    // unchanged and inexact, or a zero signed by the product of the signs when ST(1) is zero; a
+    // negative infinity is invalid.
+    const bool XBelowMinusOne = lhs.Top.Sign && !XZero && !XInf && lhs.Top.Exponent >= ExponentBias;
+    if ((XZero && YInf) || (XInf && (YZero || lhs.Top.Sign))) {
       state->exceptionFlags |= softfloat_flag_invalid;
       return Indefinite();
     }
+    if (XBelowMinusOne) {
+      if (YZero) {
+        return X80SoftFloat(ResultSign, 0, 0);
+      }
+      if (YInf) {
+        return X80SoftFloat(ResultSign, 0x7FFF, IntegerBit);
+      }
+      return MarkInexact(state, lhs);
+    }
     if (XZero) {
       return X80SoftFloat(ResultSign, 0, 0);
-    }
-    if (XMinusOne) {
-      state->exceptionFlags |= softfloat_flag_infinite;
-      return X80SoftFloat(!rhs.Top.Sign, 0x7FFF, IntegerBit);
     }
     if (XInf || YInf) {
       return X80SoftFloat(ResultSign, 0x7FFF, IntegerBit);
