@@ -646,6 +646,17 @@ struct FEX_PACKED X80SoftFloat {
     return (lhs.Top.Exponent == 0x7FFF) && (lhs.Significand & IntegerBit) && (lhs.Significand & Bottom62Significand);
   }
 
+  // Pseudo-NaN, pseudo-infinity (exponent all ones, integer bit clear) and unnormal (any other
+  // non-zero exponent, integer bit clear) encodings. The x87 treats these as invalid operands.
+  static bool IsUnsupported(const X80SoftFloat& lhs) {
+    return lhs.Top.Exponent != 0 && !(lhs.Significand & IntegerBit);
+  }
+
+  // The QNaN floating-point indefinite produced by a masked invalid operation.
+  static X80SoftFloat Indefinite() {
+    return X80SoftFloat(1, 0x7FFF, 0xC000000000000000ULL);
+  }
+
   static bool SignBit(const X80SoftFloat& lhs) {
     return lhs.Top.Sign;
   }
