@@ -151,8 +151,9 @@ struct FEX_PACKED X80SoftFloat {
   // FPREM (truncated quotient) and, with Nearest, FPREM1 (round-to-nearest-even quotient).
   // ST(0) - Q * ST(1) is computed exactly on the integer significands. When the exponent
   // difference D is 64 or more only a partial remainder is produced: hardware reduces D to the
-  // largest multiple of 64 below it, reports it through C2 (Partial) and leaves the quotient bits
-  // clear. Otherwise Quotient receives the low three bits of Q for C0, C3 and C1.
+  // largest multiple of 32 at least 32 below it (32 to 63 quotient bits), reports it through C2
+  // (Partial) and leaves the quotient bits clear. Otherwise Quotient receives the low three bits of
+  // Q for C0, C3 and C1.
   // Not preserve_all for the same reason as FYL2XP1.
   [[gnu::noinline]] static X80SoftFloat
   FREM(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs, bool Nearest, bool* Partial, uint8_t* Quotient) {
@@ -204,7 +205,9 @@ struct FEX_PACKED X80SoftFloat {
 
     using u128 = unsigned __int128;
     if (D >= 64) {
-      const int32_t Reduced = 64 * ((D - 1) / 64);
+      // Hardware reduces the exponent difference to the largest multiple of 32 at least 32 below it,
+      // producing 32 to 63 quotient bits per step.
+      const int32_t Reduced = 32 * (D / 32 - 1);
       const u128 Num = static_cast<u128>(SigX) << (D - Reduced);
       const uint64_t Rem = static_cast<uint64_t>(Num % SigY);
       *Partial = true;
