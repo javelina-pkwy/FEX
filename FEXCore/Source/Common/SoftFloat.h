@@ -148,95 +148,91 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FREM(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+  // FPREM (truncated quotient) and, with Nearest, FPREM1 (round-to-nearest-even quotient).
+  // ST(0) - Q * ST(1) is computed exactly on the integer significands. When the exponent
+  // difference D is 64 or more only a partial remainder is produced: hardware reduces D to the
+  // largest multiple of 64 below it, reports it through C2 (Partial) and leaves the quotient bits
+  // clear. Otherwise Quotient receives the low three bits of Q for C0, C3 and C1.
+  // Not preserve_all for the same reason as FYL2XP1.
+  [[gnu::noinline]] static X80SoftFloat
+  FREM(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs, bool Nearest, bool* Partial, uint8_t* Quotient) {
+    *Partial = false;
+    *Quotient = 0;
     lhs = Canonical(lhs);
     rhs = Canonical(rhs);
-#if defined(DEBUG_X86_FLOAT)
-    BIGFLOAT Result;
-    asm(R"(
-    fninit;
-    fldt %[rhs]; # st1
-    fldt %[lhs]; # st0
-    fprem;
-    fstpt %[result];
-    ffreep %%st(0);
-    )"
-        : [result] "=m"(Result)
-        : [lhs] "m"(lhs), [rhs] "m"(rhs)
-        : "st", "st(1)");
-
-    return Result;
-#else
-    /*
-     * Check for invalid operation cases first - Intel FPREM sets Invalid Operation
-     * for several cases including infinity dividend and zero divisor.
-     */
-    X80SoftFloat result = 0;
-    if (HandleInfinityOp(state, lhs, result)) {
-      return result;
-    } else if (IsNan(lhs)) {
-      // Quiet NaNs propagate silently; adding the NaN to itself quiets a signaling NaN and raises
-      // invalid only in that case.
-      return extF80_add(state, lhs, lhs);
+    if (IsNan(lhs) || IsNan(rhs)) {
+      return extF80_add(state, lhs, rhs);
     }
-
-    // Check for zero divisor - fprem(x, 0) is invalid operation
-    if (rhs.Top.Exponent == 0 && rhs.Significand == 0) {
+    const bool XZero = lhs.Top.Exponent == 0 && lhs.Significand == 0;
+    const bool YZero = rhs.Top.Exponent == 0 && rhs.Significand == 0;
+    if (lhs.Top.Exponent == 0x7FFF || YZero) {
       state->exceptionFlags |= softfloat_flag_invalid;
-      // Return QNaN
-      result.Top.Sign = 0;
-      result.Top.Exponent = 0x7FFF;
-      result.Significand = 0xC000000000000000ULL;
-      return result;
+      return Indefinite();
     }
-
-    /*
-     * FPREM is not an IEEE-754 remainder.  From the Intel spec:
-     *
-     *    Computes the remainder obtained from dividing the value in the ST(0)
-     *    register (the dividend) by the value in the ST(1) register (the divisor
-     *    or modulus), and stores the result in ST(0). The remainder represents the
-     *    following value:
-     *
-     *    Remainder := ST(0) − (Q * ST(1))
-     *
-     *    Here, Q is an integer value that is obtained by truncating the
-     *    floating-point number quotient of [ST(0) / ST(1)] toward zero.
-     *
-     * We implement this sequence literally. softfloat_round_minMag means
-     * "truncate towards zero".
-     */
-    extFloat80_t quotient = extF80_div(state, lhs, rhs);
-    extFloat80_t Q = extF80_roundToInt(state, quotient, softfloat_round_minMag, true);
-    bool Q_zero = Q.signif == 0 && (Q.signExp & ~(1 << 15)) == 0;
-
-    if (Q_zero) {
+    if (XZero || rhs.Top.Exponent == 0x7FFF) {
       return lhs;
-    } else {
-      return extF80_sub(state, lhs, extF80_mul(state, Q, rhs));
     }
-#endif
-  }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FREM1(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
-#if defined(DEBUG_X86_FLOAT)
-    BIGFLOAT Result;
-    asm(R"(
-    fninit;
-    fldt %[rhs]; # st1
-    fldt %[lhs]; # st0
-    fprem1;
-    fstpt %[result];
-    ffreep %%st(0);
-    )"
-        : [result] "=m"(Result)
-        : [lhs] "m"(lhs), [rhs] "m"(rhs)
-        : "st", "st(1)");
+    // Normalized significands and the biased exponents of their leading bits, so that
+    // value = Sig * 2^(Exp - bias - 63) for denormals too.
+    uint64_t SigX = lhs.Significand;
+    uint64_t SigY = rhs.Significand;
+    int32_t ExpX = lhs.Top.Exponent ? lhs.Top.Exponent : 1;
+    int32_t ExpY = rhs.Top.Exponent ? rhs.Top.Exponent : 1;
+    const int ShiftX = std::countl_zero(SigX);
+    const int ShiftY = std::countl_zero(SigY);
+    SigX <<= ShiftX;
+    ExpX -= ShiftX;
+    SigY <<= ShiftY;
+    ExpY -= ShiftY;
+    const int32_t D = ExpX - ExpY;
 
-    return Result;
-#else
-    return extF80_rem(state, Canonical(lhs), Canonical(rhs));
-#endif
+    if (D < -1) {
+      return lhs;
+    }
+    if (D == -1) {
+      // |y|/2 <= |x| < |y|: the truncated quotient is 0, the nearest one is 1 above the midpoint
+      // (the midpoint itself rounds to the even 0).
+      if (!Nearest || SigX <= SigY) {
+        return lhs;
+      }
+      *Quotient = 1;
+      X80SoftFloat SignedY = rhs;
+      SignedY.Top.Sign = lhs.Top.Sign;
+      return extF80_sub(state, lhs, SignedY);
+    }
+
+    using u128 = unsigned __int128;
+    if (D >= 64) {
+      const int32_t Reduced = 64 * ((D - 1) / 64);
+      const u128 Num = static_cast<u128>(SigX) << (D - Reduced);
+      const uint64_t Rem = static_cast<uint64_t>(Num % SigY);
+      *Partial = true;
+      if (Rem == 0) {
+        return X80SoftFloat(lhs.Top.Sign, 0, 0);
+      }
+      return softfloat_normRoundPackToExtF80(state, lhs.Top.Sign, ExpY + Reduced, Rem, 0, state->roundingPrecision);
+    }
+
+    const u128 Num = static_cast<u128>(SigX) << D;
+    uint64_t Q = static_cast<uint64_t>(Num / SigY);
+    uint64_t Rem = static_cast<uint64_t>(Num % SigY);
+    bool Negative = false;
+    if (Nearest) {
+      // Rounding the quotient up makes the remainder negative.
+      const u128 Twice = static_cast<u128>(Rem) * 2;
+      if (Twice > SigY || (Twice == SigY && (Q & 1))) {
+        ++Q;
+        Rem = SigY - Rem;
+        Negative = true;
+      }
+    }
+    *Quotient = Q & 7;
+    const bool Sign = lhs.Top.Sign ^ Negative;
+    if (Rem == 0) {
+      return X80SoftFloat(Sign, 0, 0);
+    }
+    return softfloat_normRoundPackToExtF80(state, Sign, ExpY, Rem, 0, state->roundingPrecision);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FRNDINT(softfloat_state* state, const X80SoftFloat& lhs) {

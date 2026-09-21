@@ -90,6 +90,15 @@ FEXCORE_PRESERVE_ALL_ATTR static bool OutOfTrigRange(const X80SoftFloat& Src, FE
   return true;
 }
 
+// FPREM/FPREM1 report a partial reduction through C2 and otherwise the low three quotient bits
+// through C0 (bit 2), C3 (bit 1) and C1 (bit 0).
+FEXCORE_PRESERVE_ALL_ATTR static void SetRemainderFlags(FEXCore::Core::CpuStateFrame* Frame, bool Partial, uint8_t Quotient) {
+  Frame->State.flags[FEXCore::X86State::X87FLAG_C2_LOC] = Partial;
+  Frame->State.flags[FEXCore::X86State::X87FLAG_C0_LOC] = (Quotient >> 2) & 1;
+  Frame->State.flags[FEXCore::X86State::X87FLAG_C3_LOC] = (Quotient >> 1) & 1;
+  Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = Quotient & 1;
+}
+
 template<>
 struct OpHandlers<IR::OP_F80CVTTO> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle4(uint16_t FCW, float src, FEXCore::Core::CpuStateFrame* Frame) {
@@ -420,7 +429,11 @@ struct OpHandlers<IR::OP_F80FPREM1> {
     if (InvalidOperand(&State.State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FREM1(&State.State, Src1, Src2);
+    bool Partial = false;
+    uint8_t Quotient = 0;
+    const X80SoftFloat Result = X80SoftFloat::FREM(&State.State, Src1, Src2, true, &Partial, &Quotient);
+    SetRemainderFlags(Frame, Partial, Quotient);
+    return Result;
   }
 };
 
@@ -432,7 +445,11 @@ struct OpHandlers<IR::OP_F80FPREM> {
     if (InvalidOperand(&State.State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FREM(&State.State, Src1, Src2);
+    bool Partial = false;
+    uint8_t Quotient = 0;
+    const X80SoftFloat Result = X80SoftFloat::FREM(&State.State, Src1, Src2, false, &Partial, &Quotient);
+    SetRemainderFlags(Frame, Partial, Quotient);
+    return Result;
   }
 };
 
