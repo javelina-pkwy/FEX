@@ -80,6 +80,16 @@ FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(softfloat_state* State, con
   return InvalidOperand(State, Src1) | InvalidOperand(State, Src2);
 }
 
+// The trigonometric instructions report an argument of 2^63 or more through C2 and leave ST(0)
+// unchanged. The dispatcher clears C2 before the operation so this survives it.
+FEXCORE_PRESERVE_ALL_ATTR static bool OutOfTrigRange(const X80SoftFloat& Src, FEXCore::Core::CpuStateFrame* Frame) {
+  if (!X80SoftFloat::IsOutOfTrigRange(Src)) {
+    return false;
+  }
+  Frame->State.flags[FEXCore::X86State::X87FLAG_C2_LOC] = 1;
+  return true;
+}
+
 template<>
 struct OpHandlers<IR::OP_F80CVTTO> {
   FEXCORE_PRESERVE_ALL_ATTR static VectorRegType handle4(uint16_t FCW, float src, FEXCore::Core::CpuStateFrame* Frame) {
@@ -228,6 +238,9 @@ struct OpHandlers<IR::OP_F80TAN> {
     if (InvalidOperand(&State.State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
+    if (OutOfTrigRange(Src1, Frame)) {
+      return Src1;
+    }
     return X80SoftFloat::FTAN(&State.State, Src1);
   }
 };
@@ -252,6 +265,9 @@ struct OpHandlers<IR::OP_F80SIN> {
     if (InvalidOperand(&State.State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
+    if (OutOfTrigRange(Src1, Frame)) {
+      return Src1;
+    }
     return X80SoftFloat::FSIN(&State.State, Src1);
   }
 };
@@ -264,6 +280,9 @@ struct OpHandlers<IR::OP_F80COS> {
     if (InvalidOperand(&State.State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
+    if (OutOfTrigRange(Src1, Frame)) {
+      return Src1;
+    }
     return X80SoftFloat::FCOS(&State.State, Src1);
   }
 };
@@ -275,6 +294,11 @@ struct OpHandlers<IR::OP_F80SINCOS> {
     ScopedSoftFloatState State {FCW, Frame, true};
     if (InvalidOperand(&State.State, Src1)) {
       return FEXCore::MakeVectorRegPair(X80SoftFloat::Indefinite(), X80SoftFloat::Indefinite());
+    }
+    // Hardware pushes nothing in this case; the extra stack slot the dispatcher allocates is left
+    // holding a copy of the operand.
+    if (OutOfTrigRange(Src1, Frame)) {
+      return FEXCore::MakeVectorRegPair(Src1, Src1);
     }
     return FEXCore::MakeVectorRegPair(X80SoftFloat::FSIN(&State.State, Src1), X80SoftFloat::FCOS(&State.State, Src1));
   }

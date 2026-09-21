@@ -745,10 +745,12 @@ void OpDispatchBuilder::FTST(OpcodeArgs) {
 }
 
 void OpDispatchBuilder::X87OpHelper(OpcodeArgs, FEXCore::IR::IROps IROp, bool ZeroC2) {
-  DeriveOp(Result, IROp, _F80SCALEStack());
+  // Clear C2 before the operation: the trigonometric fallbacks set it for an out-of-range argument
+  // and that must not be overwritten afterwards.
   if (ZeroC2) {
     SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(Constant(0));
   }
+  DeriveOp(Result, IROp, _F80SCALEStack());
   StoreX87FIP(Op);
 }
 

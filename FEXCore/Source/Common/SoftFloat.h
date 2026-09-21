@@ -592,6 +592,13 @@ struct FEX_PACKED X80SoftFloat {
       return result;
     }
 
+    if (IsNan(lhs)) {
+      return extF80_add(state, lhs, lhs);
+    }
+    if (lhs.Top.Exponent == 0 && lhs.Significand == 0) {
+      return lhs;
+    }
+
     BIGFLOAT Src_d = lhs.ToFMax(state);
     Src_d = FEXCore::cephes_128bit::tanl(Src_d);
     return X80SoftFloat(state, Src_d);
@@ -619,6 +626,14 @@ struct FEX_PACKED X80SoftFloat {
       return result;
     }
 
+    // NaNs propagate and sin(+-0) is +-0; cephes drops the sign of a zero argument.
+    if (IsNan(lhs)) {
+      return extF80_add(state, lhs, lhs);
+    }
+    if (lhs.Top.Exponent == 0 && lhs.Significand == 0) {
+      return lhs;
+    }
+
     BIGFLOAT Src_d = lhs.ToFMax(state);
     Src_d = FEXCore::cephes_128bit::sinl(Src_d);
     return X80SoftFloat(state, Src_d);
@@ -644,6 +659,10 @@ struct FEX_PACKED X80SoftFloat {
     X80SoftFloat result;
     if (HandleInfinityOp(state, lhs, result)) {
       return result;
+    }
+
+    if (IsNan(lhs)) {
+      return extF80_add(state, lhs, lhs);
     }
 
     BIGFLOAT Src_d = lhs.ToFMax(state);
@@ -799,6 +818,12 @@ struct FEX_PACKED X80SoftFloat {
 
   static bool IsSignalingNan(const X80SoftFloat& lhs) {
     return IsNan(lhs) && !(lhs.Significand & QuietBit);
+  }
+
+  // FSIN/FCOS/FSINCOS/FPTAN only reduce arguments below 2^63 in magnitude; beyond that they set C2
+  // and leave the operand untouched.
+  static bool IsOutOfTrigRange(const X80SoftFloat& lhs) {
+    return lhs.Top.Exponent != 0x7FFF && lhs.Top.Exponent >= ExponentBias + 63;
   }
 
   // Pseudo-NaN, pseudo-infinity (exponent all ones, integer bit clear) and unnormal (any other
