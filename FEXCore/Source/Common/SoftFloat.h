@@ -79,7 +79,7 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_add(state, lhs, rhs);
+    return extF80_add(state, Canonical(lhs), Canonical(rhs));
 #endif
   }
 
@@ -99,7 +99,7 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_sub(state, lhs, rhs);
+    return extF80_sub(state, Canonical(lhs), Canonical(rhs));
 #endif
   }
 
@@ -119,7 +119,7 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_mul(state, lhs, rhs);
+    return extF80_mul(state, Canonical(lhs), Canonical(rhs));
 #endif
   }
 
@@ -139,11 +139,13 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_div(state, lhs, rhs);
+    return extF80_div(state, Canonical(lhs), Canonical(rhs));
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FREM(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FREM(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
 #if defined(DEBUG_X86_FLOAT)
     BIGFLOAT Result;
     asm(R"(
@@ -228,19 +230,20 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_rem(state, lhs, rhs);
+    return extF80_rem(state, Canonical(lhs), Canonical(rhs));
 #endif
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FRNDINT(softfloat_state* state, const X80SoftFloat& lhs) {
-    return extF80_roundToInt(state, lhs, state->roundingMode, false);
+    return extF80_roundToInt(state, Canonical(lhs), state->roundingMode, false);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FRNDINT(softfloat_state* state, const X80SoftFloat& lhs, uint_fast8_t RoundMode) {
-    return extF80_roundToInt(state, lhs, RoundMode, false);
+    return extF80_roundToInt(state, Canonical(lhs), RoundMode, false);
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FXTRACT_SIG(const X80SoftFloat& lhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FXTRACT_SIG(X80SoftFloat lhs) {
+    lhs = Canonical(lhs);
 #if defined(DEBUG_X86_FLOAT)
     BIGFLOAT Result;
     asm(R"(
@@ -271,7 +274,8 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FXTRACT_EXP(const X80SoftFloat& lhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FXTRACT_EXP(X80SoftFloat lhs) {
+    lhs = Canonical(lhs);
 #if defined(DEBUG_X86_FLOAT)
     BIGFLOAT Result;
     asm(R"(
@@ -306,8 +310,9 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static void
-  FCMP(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs, bool* eq, bool* lt, bool* nan) {
+  FEXCORE_PRESERVE_ALL_ATTR static void FCMP(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs, bool* eq, bool* lt, bool* nan) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
     *eq = extF80_eq(state, lhs, rhs);
     *lt = extF80_lt(state, lhs, rhs);
 
@@ -317,7 +322,9 @@ struct FEX_PACKED X80SoftFloat {
     *nan = !(*eq) && !(*lt) && !gt;
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSCALE(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSCALE(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -369,7 +376,7 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    auto Src1_d = lhs.ToFMax(state);
+    auto Src1_d = Canonical(lhs).ToFMax(state);
     auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
 
     static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
@@ -393,8 +400,8 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    auto Src1_d = lhs.ToFMax(state);
-    auto Src2_d = rhs.ToFMax(state);
+    auto Src1_d = Canonical(lhs).ToFMax(state);
+    auto Src2_d = Canonical(rhs).ToFMax(state);
 
     auto Tmp = f128_mul(state, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
     return X80SoftFloat(state, Tmp);
@@ -417,14 +424,15 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    BIGFLOAT Src1_d = lhs.ToFMax(state);
-    BIGFLOAT Src2_d = rhs.ToFMax(state);
+    BIGFLOAT Src1_d = Canonical(lhs).ToFMax(state);
+    BIGFLOAT Src2_d = Canonical(rhs).ToFMax(state);
     BIGFLOAT Tmp = FEXCore::cephes_128bit::atan2l(Src1_d, Src2_d);
     return X80SoftFloat(state, Tmp);
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FTAN(softfloat_state* state, const X80SoftFloat& lhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FTAN(softfloat_state* state, X80SoftFloat lhs) {
+    lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -451,7 +459,8 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSIN(softfloat_state* state, const X80SoftFloat& lhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSIN(softfloat_state* state, X80SoftFloat lhs) {
+    lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -477,7 +486,8 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FCOS(softfloat_state* state, const X80SoftFloat& lhs) {
+  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FCOS(softfloat_state* state, X80SoftFloat lhs) {
+    lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -518,7 +528,7 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    return extF80_sqrt(state, lhs);
+    return extF80_sqrt(state, Canonical(lhs));
 #endif
   }
 
@@ -655,6 +665,19 @@ struct FEX_PACKED X80SoftFloat {
   // The QNaN floating-point indefinite produced by a masked invalid operation.
   static X80SoftFloat Indefinite() {
     return X80SoftFloat(1, 0x7FFF, 0xC000000000000000ULL);
+  }
+
+  // A pseudo-denormal (zero exponent, integer bit set) denotes the same value as the normal with
+  // biased exponent 1. Berkeley SoftFloat assumes subnormal significands have the integer bit clear,
+  // so it orders pseudo-denormals lexicographically below that normal and drops the carry when
+  // adding two of them; hardware evaluates them by value.
+  static X80SoftFloat Canonical(const X80SoftFloat& lhs) {
+    if (lhs.Top.Exponent != 0 || !(lhs.Significand & IntegerBit)) {
+      return lhs;
+    }
+    X80SoftFloat Result = lhs;
+    Result.Top.Exponent = 1;
+    return Result;
   }
 
   static bool SignBit(const X80SoftFloat& lhs) {
