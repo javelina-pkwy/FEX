@@ -427,7 +427,13 @@ struct FEX_PACKED X80SoftFloat {
       const float128_t t = f128_mul(state, Src1_d, Ln2_128);
       float128_t poly = f128_add(state, half, f128_mul(state, t, sixth));
       poly = f128_add(state, one, f128_mul(state, t, poly));
-      return X80SoftFloat(state, f128_mul(state, t, poly));
+      float128_t Result = f128_mul(state, t, poly);
+      // 2^x - 1 > x*ln2 for either sign of x: keep the direction when the quadratic term is below
+      // binary128 precision.
+      if (SameBits(Result, t)) {
+        Result = NudgeToward(Result, true);
+      }
+      return X80SoftFloat(state, Result);
     }
 
     auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
@@ -529,7 +535,8 @@ struct FEX_PACKED X80SoftFloat {
     const float128_t U = f128_add(state, one, X);
     float128_t Log;
     if (U.v[0] == one.v[0] && U.v[1] == one.v[1]) {
-      Log = f128_div(state, X, Ln2_128);
+      // log2(1 + x) < x/ln2 for either sign of x once the quadratic term is below binary128 precision.
+      Log = NudgeToward(f128_div(state, X, Ln2_128), false);
     } else {
       Log = f128_mul(state, FEXCore::cephes_128bit::log2l(U), f128_div(state, X, f128_sub(state, U, one)));
     }
@@ -586,6 +593,12 @@ struct FEX_PACKED X80SoftFloat {
     BIGFLOAT Src1_d = lhs.ToFMax(state);
     BIGFLOAT Src2_d = rhs.ToFMax(state);
     BIGFLOAT Tmp = FEXCore::cephes_128bit::atan2l(Src1_d, Src2_d);
+    // |atan(y/x)| < |y/x|: keep the direction when the cubic term is below binary128 precision. The
+    // ratio is formed on a scratch state so its rounding does not leak into the flags.
+    softfloat_state Scratch = *state;
+    if (SameBits(Tmp, f128_div(&Scratch, Src1_d, Src2_d))) {
+      Tmp = NudgeTowardZero(Tmp);
+    }
     return X80SoftFloat(state, Tmp);
 #endif
   }
@@ -619,8 +632,12 @@ struct FEX_PACKED X80SoftFloat {
       return lhs;
     }
 
-    BIGFLOAT Src_d = lhs.ToFMax(state);
-    Src_d = FEXCore::cephes_128bit::tanl(Src_d);
+    const BIGFLOAT X = lhs.ToFMax(state);
+    BIGFLOAT Src_d = FEXCore::cephes_128bit::tanl(X);
+    // |tan x| > |x|: keep the direction when the cubic term is below binary128 precision.
+    if (SameBits(Src_d, X)) {
+      Src_d = NudgeAwayFromZero(Src_d);
+    }
     return X80SoftFloat(state, Src_d);
 #endif
   }
@@ -654,8 +671,12 @@ struct FEX_PACKED X80SoftFloat {
       return lhs;
     }
 
-    BIGFLOAT Src_d = lhs.ToFMax(state);
-    Src_d = FEXCore::cephes_128bit::sinl(Src_d);
+    const BIGFLOAT X = lhs.ToFMax(state);
+    BIGFLOAT Src_d = FEXCore::cephes_128bit::sinl(X);
+    // |sin x| < |x|: keep the direction when the cubic term is below binary128 precision.
+    if (SameBits(Src_d, X)) {
+      Src_d = NudgeTowardZero(Src_d);
+    }
     return X80SoftFloat(state, Src_d);
 #endif
   }
@@ -685,8 +706,12 @@ struct FEX_PACKED X80SoftFloat {
       return extF80_add(state, lhs, lhs);
     }
 
-    BIGFLOAT Src_d = lhs.ToFMax(state);
-    Src_d = FEXCore::cephes_128bit::cosl(Src_d);
+    BIGFLOAT Src_d = FEXCore::cephes_128bit::cosl(lhs.ToFMax(state));
+    // cos x < 1 for x != 0: keep the direction when the quadratic term is below binary128 precision.
+    static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
+    if (SameBits(Src_d, one) && !(lhs.Top.Exponent == 0 && lhs.Significand == 0)) {
+      Src_d = NudgeTowardZero(Src_d);
+    }
     return X80SoftFloat(state, Src_d);
 #endif
   }
@@ -890,6 +915,36 @@ private:
       Value.v[1] ^= 0x8000000000000000ULL;
     }
     return X80SoftFloat(state, Value);
+  }
+
+  static bool SameBits(float128_t a, float128_t b) {
+    return a.v[0] == b.v[0] && a.v[1] == b.v[1];
+  }
+
+  // Moves a finite non-zero binary128 value one ulp toward +inf or -inf. When a transcendental
+  // result rounds to its leading term in binary128 although the true value lies strictly on one
+  // side of it (sin x rounding to x, cos x to 1), the 80-bit rounding would otherwise see an exact
+  // value and directed rounding modes would produce the wrong neighbour.
+  static float128_t NudgeToward(float128_t Value, bool PlusInfinity) {
+    const bool Negative = Value.v[1] >> 63;
+    const bool Up = PlusInfinity != Negative;
+    unsigned __int128 Bits = (static_cast<unsigned __int128>(Value.v[1] & 0x7FFFFFFFFFFFFFFFULL) << 64) | Value.v[0];
+    if (Bits == 0) {
+      // The leading term itself underflowed; there is no neighbour to move to.
+      return Value;
+    }
+    Bits += Up ? 1 : static_cast<unsigned __int128>(-1);
+    Value.v[0] = static_cast<uint64_t>(Bits);
+    Value.v[1] = (Value.v[1] & 0x8000000000000000ULL) | static_cast<uint64_t>(Bits >> 64);
+    return Value;
+  }
+
+  static float128_t NudgeTowardZero(float128_t Value) {
+    return NudgeToward(Value, Value.v[1] >> 63);
+  }
+
+  static float128_t NudgeAwayFromZero(float128_t Value) {
+    return NudgeToward(Value, !(Value.v[1] >> 63));
   }
   static constexpr uint64_t Bottom62Significand = ((1ULL << 62) - 1);
   static constexpr uint32_t ExponentBias = 16383;
