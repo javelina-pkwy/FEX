@@ -102,6 +102,23 @@ FEXCORE_PRESERVE_ALL_ATTR static bool OutOfTrigRange(const X80SoftFloat& Src, FE
   return true;
 }
 
+// Hardware reports through C1 whether an inexact result was rounded up in magnitude. Rounding toward
+// zero never rounds up, so when the result is inexact it was rounded up exactly when it differs from
+// the truncated evaluation. Exact results clear C1.
+template<typename Fn>
+FEXCORE_PRESERVE_ALL_ATTR static auto WithRoundUp(ScopedSoftFloatState& State, Fn&& Op) {
+  const auto Result = Op(&State.State);
+  bool RoundedUp = false;
+  if (State.State.exceptionFlags & softfloat_flag_inexact) {
+    softfloat_state Truncating = State.State;
+    Truncating.roundingMode = softfloat_round_minMag;
+    const auto Truncated = Op(&Truncating);
+    RoundedUp = memcmp(&Result, &Truncated, sizeof(Result)) != 0;
+  }
+  State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = RoundedUp;
+  return Result;
+}
+
 // FPREM/FPREM1 report a partial reduction through C2 and otherwise the low three quotient bits
 // through C0 (bit 2), C3 (bit 1) and C1 (bit 0).
 FEXCORE_PRESERVE_ALL_ATTR static void SetRemainderFlags(FEXCore::Core::CpuStateFrame* Frame, bool Partial, uint8_t Quotient) {
@@ -167,13 +184,15 @@ struct OpHandlers<IR::OP_F80CVT> {
   FEXCORE_PRESERVE_ALL_ATTR static float handle4(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    return X80SoftFloat(src).ToF32(&State.State);
+    InvalidOperand(State, src);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat(src).ToF32(S); });
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static double handle8(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    return X80SoftFloat(src).ToF64(&State.State);
+    InvalidOperand(State, src);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat(src).ToF64(S); });
   }
 };
 
@@ -182,24 +201,26 @@ struct OpHandlers<IR::OP_F80CVTINT> {
   FEXCORE_PRESERVE_ALL_ATTR static int16_t handle2(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    return X80SoftFloat(src).ToI16(&State.State);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat(src).ToI16(S); });
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static int32_t handle4(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    return X80SoftFloat(src).ToI32(&State.State);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat(src).ToI32(S); });
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static int64_t handle8(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
-    return X80SoftFloat(src).ToI64(&State.State);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat(src).ToI64(S); });
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static int16_t handle2t(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
+    // Truncation never rounds up.
+    State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
     auto rv = extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
 
     if (rv > INT16_MAX || rv < INT16_MIN) {
@@ -213,12 +234,14 @@ struct OpHandlers<IR::OP_F80CVTINT> {
   FEXCORE_PRESERVE_ALL_ATTR static int32_t handle4t(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
+    State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
     return extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static int64_t handle8t(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
+    State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
     return extF80_to_i64(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
   }
 };
@@ -244,7 +267,7 @@ struct OpHandlers<IR::OP_F80ROUND> {
     if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FRNDINT(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FRNDINT(S, Src1); });
   }
 };
 
@@ -256,7 +279,7 @@ struct OpHandlers<IR::OP_F80F2XM1> {
     if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::F2XM1(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::F2XM1(S, Src1); });
   }
 };
 
@@ -271,7 +294,7 @@ struct OpHandlers<IR::OP_F80TAN> {
     if (OutOfTrigRange(Src1, Frame)) {
       return Src1;
     }
-    return X80SoftFloat::FTAN(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FTAN(S, Src1); });
   }
 };
 
@@ -283,7 +306,7 @@ struct OpHandlers<IR::OP_F80SQRT> {
     if (InvalidOperand(State, Src1)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FSQRT(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FSQRT(S, Src1); });
   }
 };
 
@@ -298,7 +321,7 @@ struct OpHandlers<IR::OP_F80SIN> {
     if (OutOfTrigRange(Src1, Frame)) {
       return Src1;
     }
-    return X80SoftFloat::FSIN(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FSIN(S, Src1); });
   }
 };
 
@@ -313,7 +336,7 @@ struct OpHandlers<IR::OP_F80COS> {
     if (OutOfTrigRange(Src1, Frame)) {
       return Src1;
     }
-    return X80SoftFloat::FCOS(&State.State, Src1);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FCOS(S, Src1); });
   }
 };
 
@@ -330,7 +353,10 @@ struct OpHandlers<IR::OP_F80SINCOS> {
     if (OutOfTrigRange(Src1, Frame)) {
       return FEXCore::MakeVectorRegPair(Src1, Src1);
     }
-    return FEXCore::MakeVectorRegPair(X80SoftFloat::FSIN(&State.State, Src1), X80SoftFloat::FCOS(&State.State, Src1));
+    // C1 follows the cosine, which ends up in ST(0).
+    const X80SoftFloat Sin = X80SoftFloat::FSIN(&State.State, Src1);
+    const X80SoftFloat Cos = WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FCOS(S, Src1); });
+    return FEXCore::MakeVectorRegPair(Sin, Cos);
   }
 };
 
@@ -366,7 +392,7 @@ struct OpHandlers<IR::OP_F80ADD> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FADD(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FADD(S, Src1, Src2); });
   }
 };
 
@@ -378,7 +404,7 @@ struct OpHandlers<IR::OP_F80SUB> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FSUB(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FSUB(S, Src1, Src2); });
   }
 };
 
@@ -390,7 +416,7 @@ struct OpHandlers<IR::OP_F80MUL> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FMUL(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FMUL(S, Src1, Src2); });
   }
 };
 
@@ -402,7 +428,7 @@ struct OpHandlers<IR::OP_F80DIV> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FDIV(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FDIV(S, Src1, Src2); });
   }
 };
 
@@ -414,7 +440,7 @@ struct OpHandlers<IR::OP_F80FYL2X> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FYL2X(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FYL2X(S, Src1, Src2); });
   }
 };
 
@@ -426,7 +452,7 @@ struct OpHandlers<IR::OP_F80FYL2XP1> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FYL2XP1(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FYL2XP1(S, Src1, Src2); });
   }
 };
 
@@ -438,7 +464,7 @@ struct OpHandlers<IR::OP_F80ATAN> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FATAN(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FATAN(S, Src1, Src2); });
   }
 };
 
@@ -482,7 +508,7 @@ struct OpHandlers<IR::OP_F80SCALE> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    return X80SoftFloat::FSCALE(&State.State, Src1, Src2);
+    return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FSCALE(S, Src1, Src2); });
   }
 };
 
