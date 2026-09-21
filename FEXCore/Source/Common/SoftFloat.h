@@ -236,11 +236,11 @@ struct FEX_PACKED X80SoftFloat {
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FRNDINT(softfloat_state* state, const X80SoftFloat& lhs) {
-    return extF80_roundToInt(state, Canonical(lhs), state->roundingMode, false);
+    return extF80_roundToInt(state, Canonical(lhs), state->roundingMode, true);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FRNDINT(softfloat_state* state, const X80SoftFloat& lhs, uint_fast8_t RoundMode) {
-    return extF80_roundToInt(state, Canonical(lhs), RoundMode, false);
+    return extF80_roundToInt(state, Canonical(lhs), RoundMode, true);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FXTRACT_SIG(X80SoftFloat lhs) {
@@ -440,7 +440,7 @@ struct FEX_PACKED X80SoftFloat {
     }
 
     auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
-    return MarkInexact(state, X80SoftFloat(state, f128_sub(&Scratch, Result, one)));
+    return MarkInexact(state, FromF128Result(state, f128_sub(&Scratch, Result, one)));
 #endif
   }
 
@@ -479,11 +479,19 @@ struct FEX_PACKED X80SoftFloat {
       return Indefinite();
     }
     if (XZero) {
-      state->exceptionFlags |= softfloat_flag_infinite;
+      // log2(0) is a zero-divide; hardware does not report it when ST(1) is already infinite.
+      if (!YInf) {
+        state->exceptionFlags |= softfloat_flag_infinite;
+      }
       return X80SoftFloat(!rhs.Top.Sign, 0x7FFF, IntegerBit);
     }
     if (XInf) {
       return X80SoftFloat(rhs.Top.Sign, 0x7FFF, IntegerBit);
+    }
+    if (YInf) {
+      // inf * log2(x) is an exact infinity, negative when x < 1.
+      const bool LessThanOne = lhs.Top.Exponent < ExponentBias;
+      return X80SoftFloat(rhs.Top.Sign ^ LessThanOne, 0x7FFF, IntegerBit);
     }
 
     auto Src1_d = lhs.ToFMax(state);
@@ -491,7 +499,7 @@ struct FEX_PACKED X80SoftFloat {
 
     softfloat_state Scratch = *state;
     auto Tmp = f128_mul(&Scratch, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
-    return MarkInexact(state, X80SoftFloat(state, Tmp));
+    return MarkInexact(state, FromF128Result(state, Tmp));
 #endif
   }
 
@@ -545,7 +553,7 @@ struct FEX_PACKED X80SoftFloat {
     } else {
       Log = f128_mul(&Scratch, FEXCore::cephes_128bit::log2l(U), f128_div(&Scratch, X, f128_sub(&Scratch, U, one)));
     }
-    return MarkInexact(state, X80SoftFloat(state, f128_mul(&Scratch, rhs.ToFMax(state), Log)));
+    return MarkInexact(state, FromF128Result(state, f128_mul(&Scratch, rhs.ToFMax(state), Log)));
   }
 
   // Not preserve_all for the same reason as FYL2XP1.
@@ -774,7 +782,7 @@ struct FEX_PACKED X80SoftFloat {
   }
 
   int16_t ToI16(softfloat_state* state) const {
-    auto rv = extF80_to_i32(state, *this, state->roundingMode, false);
+    auto rv = extF80_to_i32(state, *this, state->roundingMode, true);
     if (rv > INT16_MAX || rv < INT16_MIN) {
       ///< Indefinite value for 16-bit conversions.
       return INT16_MIN;
@@ -784,11 +792,11 @@ struct FEX_PACKED X80SoftFloat {
   }
 
   int32_t ToI32(softfloat_state* state) const {
-    return extF80_to_i32(state, *this, state->roundingMode, false);
+    return extF80_to_i32(state, *this, state->roundingMode, true);
   }
 
   int64_t ToI64(softfloat_state* state) const {
-    return extF80_to_i64(state, *this, state->roundingMode, false);
+    return extF80_to_i64(state, *this, state->roundingMode, true);
   }
 
   uint64_t ToUI64(softfloat_state* state) const {
@@ -930,6 +938,17 @@ private:
 
   static bool SameBits(float128_t a, float128_t b) {
     return a.v[0] == b.v[0] && a.v[1] == b.v[1];
+  }
+
+  // Rounds a binary128 result to 80 bits. A product of finite operands that overflowed binary128 is
+  // an infinity there, which would convert exactly; route it through the overflow response instead
+  // so the control word decides between infinity and the largest finite value and OE/PE are raised.
+  static X80SoftFloat FromF128Result(softfloat_state* state, float128_t Value) {
+    const bool Infinite = ((Value.v[1] >> 48) & 0x7FFF) == 0x7FFF && (Value.v[1] & 0xFFFFFFFFFFFFULL) == 0 && Value.v[0] == 0;
+    if (Infinite) {
+      return softfloat_normRoundPackToExtF80(state, Value.v[1] >> 63, 0x7FFF, IntegerBit, 0, state->roundingPrecision);
+    }
+    return X80SoftFloat(state, Value);
   }
 
   // Hardware evaluates the transcendentals iteratively and reports every finite non-zero result as

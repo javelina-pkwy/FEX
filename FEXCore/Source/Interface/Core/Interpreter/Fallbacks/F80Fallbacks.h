@@ -229,7 +229,7 @@ struct OpHandlers<IR::OP_F80CVTINT> {
     ScopedSoftFloatState State {FCW, Frame};
     // Truncation never rounds up.
     State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
-    auto rv = extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
+    auto rv = extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, true);
 
     if (rv > INT16_MAX || rv < INT16_MIN) {
       ///< Indefinite value for 16-bit conversions.
@@ -243,14 +243,14 @@ struct OpHandlers<IR::OP_F80CVTINT> {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
     State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
-    return extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
+    return extF80_to_i32(&State.State, X80SoftFloat(src), softfloat_round_minMag, true);
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static int64_t handle8t(uint16_t FCW, VectorRegType src, FEXCore::Core::CpuStateFrame* Frame) {
     FEXCORE_PROFILE_INSTANT_INCREMENT(Frame->Thread, AccumulatedFloatFallbackCount, 1);
     ScopedSoftFloatState State {FCW, Frame};
     State.Frame->State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = 0;
-    return extF80_to_i64(&State.State, X80SoftFloat(src), softfloat_round_minMag, false);
+    return extF80_to_i64(&State.State, X80SoftFloat(src), softfloat_round_minMag, true);
   }
 };
 
@@ -436,9 +436,9 @@ struct OpHandlers<IR::OP_F80DIV> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    // A zero dividend short-circuits without consuming the divisor.
-    const X80SoftFloat Dividend = Src1;
-    State.SuppressDenormal = Dividend.Top.Exponent == 0 && Dividend.Significand == 0;
+    // A zero divisor short-circuits to the zero-divide response without consuming the dividend.
+    const X80SoftFloat Divisor = Src2;
+    State.SuppressDenormal = Divisor.Top.Exponent == 0 && Divisor.Significand == 0;
     return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FDIV(S, Src1, Src2); });
   }
 };
