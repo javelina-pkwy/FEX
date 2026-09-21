@@ -374,7 +374,7 @@ void OpDispatchBuilder::FCOMIF64(OpcodeArgs, IR::OpSize Width, bool Integer, OpD
     FEX_UNREACHABLE;
   }
 
-  if (WhichFlags == FCOMIFlags::FLAGS_X87) {
+  if (FCOMIWritesX87Flags(WhichFlags)) {
     // We are going to clobber NZCV, make sure it's in a GPR first.
     SaveNZCV();
 

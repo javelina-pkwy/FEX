@@ -687,7 +687,7 @@ void OpDispatchBuilder::FCOMI(OpcodeArgs, IR::OpSize Width, bool Integer, OpDisp
   HostFlag_CF = _Or(OpSize::i32Bit, HostFlag_CF, HostFlag_Unordered);
   HostFlag_ZF = _Or(OpSize::i32Bit, HostFlag_ZF, HostFlag_Unordered);
 
-  if (WhichFlags == FCOMIFlags::FLAGS_X87) {
+  if (FCOMIWritesX87Flags(WhichFlags)) {
     SetRFLAG<FEXCore::X86State::X87FLAG_C0_LOC>(HostFlag_CF);
     SetRFLAG<FEXCore::X86State::X87FLAG_C1_LOC>(Constant(0));
     SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(HostFlag_Unordered);
@@ -708,9 +708,12 @@ void OpDispatchBuilder::FCOMI(OpcodeArgs, IR::OpSize Width, bool Integer, OpDisp
     SetRFLAG<FEXCore::X86State::RFLAG_AF_RAW_LOC>(Constant(0));
   }
 
-  // Set Invalid Operation flag when unordered (NaN comparison)
+  // Ordered compares signal #IA for any NaN operand. Unordered compares (FUCOM family) only signal for
+  // signaling NaNs and unsupported encodings, which the compare fallback reports through IE itself.
   // The x87 exception flags are sticky. Preserve earlier result
-  SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(_Or(OpSize::i32Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), HostFlag_Unordered));
+  if (!FCOMIIsUnordered(WhichFlags)) {
+    SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(_Or(OpSize::i32Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), HostFlag_Unordered));
+  }
 
   if (PopTwice) {
     _PopStackDestroy();

@@ -169,10 +169,10 @@ struct FEX_PACKED X80SoftFloat {
     X80SoftFloat result = 0;
     if (HandleInfinityOp(state, lhs, result)) {
       return result;
-    } else if (lhs.Top.Exponent == 0x7FFF && (lhs.Significand & 0x7FFFFFFFFFFFFFFFULL)) { // NaN
-      // propagate NaN
-      state->exceptionFlags |= softfloat_flag_invalid;
-      return lhs;
+    } else if (IsNan(lhs)) {
+      // Quiet NaNs propagate silently; adding the NaN to itself quiets a signaling NaN and raises
+      // invalid only in that case.
+      return extF80_add(state, lhs, lhs);
     }
 
     // Check for zero divisor - fprem(x, 0) is invalid operation
@@ -313,13 +313,20 @@ struct FEX_PACKED X80SoftFloat {
   FEXCORE_PRESERVE_ALL_ATTR static void FCMP(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs, bool* eq, bool* lt, bool* nan) {
     lhs = Canonical(lhs);
     rhs = Canonical(rhs);
+    // A signaling NaN operand raises invalid regardless of the compare flavour; quiet NaNs are left
+    // to the caller (FCOM signals on them, FUCOM does not), so the predicates below must not raise.
+    if (IsNan(lhs) || IsNan(rhs)) {
+      if (IsSignalingNan(lhs) || IsSignalingNan(rhs)) {
+        state->exceptionFlags |= softfloat_flag_invalid;
+      }
+      *eq = false;
+      *lt = false;
+      *nan = true;
+      return;
+    }
     *eq = extF80_eq(state, lhs, rhs);
     *lt = extF80_lt(state, lhs, rhs);
-
-    // Use IEEE 754 semantics: unordered if neither <, =, nor > is true
-    // This is more reliable than custom NaN detection
-    bool gt = !(*eq) && !(*lt) && extF80_le(state, rhs, lhs);
-    *nan = !(*eq) && !(*lt) && !gt;
+    *nan = false;
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSCALE(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
@@ -652,8 +659,14 @@ struct FEX_PACKED X80SoftFloat {
     return Result;
   }
 
+  // Any NaN with the integer bit set, including the default QNaN whose only payload bit is the quiet
+  // bit (0xC000'0000'0000'0000).
   static bool IsNan(const X80SoftFloat& lhs) {
-    return (lhs.Top.Exponent == 0x7FFF) && (lhs.Significand & IntegerBit) && (lhs.Significand & Bottom62Significand);
+    return (lhs.Top.Exponent == 0x7FFF) && (lhs.Significand & IntegerBit) && (lhs.Significand & ~IntegerBit);
+  }
+
+  static bool IsSignalingNan(const X80SoftFloat& lhs) {
+    return IsNan(lhs) && !(lhs.Significand & QuietBit);
   }
 
   // Pseudo-NaN, pseudo-infinity (exponent all ones, integer bit clear) and unnormal (any other
@@ -686,6 +699,7 @@ struct FEX_PACKED X80SoftFloat {
 
 private:
   static constexpr uint64_t IntegerBit = (1ULL << 63);
+  static constexpr uint64_t QuietBit = (1ULL << 62);
   static constexpr uint64_t Bottom62Significand = ((1ULL << 62) - 1);
   static constexpr uint32_t ExponentBias = 16383;
 

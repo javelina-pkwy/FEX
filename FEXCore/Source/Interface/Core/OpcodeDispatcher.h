@@ -763,10 +763,19 @@ public:
   void X87OpHelper(OpcodeArgs, FEXCore::IR::IROps IROp, bool ZeroC2);
   void X87NOP(OpcodeArgs);
 
+  // The UNORDERED variants are the FUCOM family: quiet NaNs compare unordered without #IA.
   enum class FCOMIFlags {
     FLAGS_X87,
     FLAGS_RFLAGS,
+    FLAGS_X87_UNORDERED,
+    FLAGS_RFLAGS_UNORDERED,
   };
+  static bool FCOMIWritesX87Flags(FCOMIFlags Flags) {
+    return Flags == FCOMIFlags::FLAGS_X87 || Flags == FCOMIFlags::FLAGS_X87_UNORDERED;
+  }
+  static bool FCOMIIsUnordered(FCOMIFlags Flags) {
+    return Flags == FCOMIFlags::FLAGS_X87_UNORDERED || Flags == FCOMIFlags::FLAGS_RFLAGS_UNORDERED;
+  }
   void FCOMI(OpcodeArgs, IR::OpSize Width, bool Integer, FCOMIFlags WhichFlags, bool PopTwice);
 
   // F64 X87 Ops
