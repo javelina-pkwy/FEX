@@ -402,10 +402,9 @@ struct FEX_PACKED X80SoftFloat {
     // result is x*ln2 + O(x^2). Below 2^-32 evaluate the Taylor series t + t^2/2 + t^3/6 with
     // t = x*ln2 instead; the omitted t^4/24 term is around 2^-100 relative, far below the target.
     if (lhs.Top.Exponent < ExponentBias - 32) {
-      static const float128_t ln2 {0xF35793C7673007E6ULL, 0x3FFE62E42FEFA39EULL};
       static const float128_t half {0x0ULL, 0x3ffe000000000000ULL};
       static const float128_t sixth {0x5555555555555555ULL, 0x3FFC555555555555ULL};
-      const float128_t t = f128_mul(state, Src1_d, ln2);
+      const float128_t t = f128_mul(state, Src1_d, Ln2_128);
       float128_t poly = f128_add(state, half, f128_mul(state, t, sixth));
       poly = f128_add(state, one, f128_mul(state, t, poly));
       return X80SoftFloat(state, f128_mul(state, t, poly));
@@ -464,6 +463,57 @@ struct FEX_PACKED X80SoftFloat {
     auto Tmp = f128_mul(state, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
     return X80SoftFloat(state, Tmp);
 #endif
+  }
+
+  // Deliberately not preserve_all: this keeps enough values live across the softfloat calls that
+  // clang's preserve_all frame lowering runs past the stp offset range and spills callee-saved
+  // registers below the stack pointer, where the nested calls destroy them. The preserve_all fallback
+  // handler calling this saves the register file around the call instead.
+  [[gnu::noinline]] static X80SoftFloat FYL2XP1(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
+    // ST(1) * log2(1 + ST(0)). NaNs propagate. A zero ST(0) gives a zero signed by the product of the
+    // operand signs (invalid against an infinite ST(1)); an infinite ST(1) gives an infinity signed
+    // the same way. ST(0) below -1 is invalid, exactly -1 is log2(0): a zero-divide infinity.
+    if (IsNan(lhs) || IsNan(rhs)) {
+      return extF80_add(state, lhs, rhs);
+    }
+    const bool XZero = lhs.Top.Exponent == 0 && lhs.Significand == 0;
+    const bool YZero = rhs.Top.Exponent == 0 && rhs.Significand == 0;
+    const bool XInf = lhs.Top.Exponent == 0x7FFF;
+    const bool YInf = rhs.Top.Exponent == 0x7FFF;
+    const X80SoftFloat MinusOne(1, ExponentBias, IntegerBit);
+    const bool XMinusOne = extF80_eq(state, lhs, MinusOne);
+    const uint16_t ResultSign = lhs.Top.Sign ^ rhs.Top.Sign;
+    if ((XZero && YInf) || ((XInf || XMinusOne) && YZero) || extF80_lt(state, lhs, MinusOne)) {
+      state->exceptionFlags |= softfloat_flag_invalid;
+      return Indefinite();
+    }
+    if (XZero) {
+      return X80SoftFloat(ResultSign, 0, 0);
+    }
+    if (XMinusOne) {
+      state->exceptionFlags |= softfloat_flag_infinite;
+      return X80SoftFloat(!rhs.Top.Sign, 0x7FFF, IntegerBit);
+    }
+    if (XInf || YInf) {
+      return X80SoftFloat(ResultSign, 0x7FFF, IntegerBit);
+    }
+
+    // Forming 1 + x directly loses the low bits of a small x (and all of it below 2^-113), which is
+    // exactly the range this instruction exists for. Correct the rounding of u = 1 + x with
+    // log2(1 + x) = log2(u) * (x / (u - 1)), and fall back to x / ln2 when u rounds to 1. The ratio
+    // is formed first because log2(u) * x overflows for x near the largest finite value.
+    static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
+    const float128_t X = lhs.ToFMax(state);
+    const float128_t U = f128_add(state, one, X);
+    float128_t Log;
+    if (U.v[0] == one.v[0] && U.v[1] == one.v[1]) {
+      Log = f128_div(state, X, Ln2_128);
+    } else {
+      Log = f128_mul(state, FEXCore::cephes_128bit::log2l(U), f128_div(state, X, f128_sub(state, U, one)));
+    }
+    return X80SoftFloat(state, f128_mul(state, rhs.ToFMax(state), Log));
   }
 
   FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FATAN(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
@@ -751,6 +801,8 @@ struct FEX_PACKED X80SoftFloat {
 private:
   static constexpr uint64_t IntegerBit = (1ULL << 63);
   static constexpr uint64_t QuietBit = (1ULL << 62);
+  // ln(2) as binary128.
+  static constexpr float128_t Ln2_128 {0xF35793C7673007E6ULL, 0x3FFE62E42FEFA39EULL};
   static constexpr uint64_t Bottom62Significand = ((1ULL << 62) - 1);
   static constexpr uint32_t ExponentBias = 16383;
 

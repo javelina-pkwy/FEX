@@ -372,8 +372,7 @@ struct OpHandlers<IR::OP_F80FYL2XP1> {
     if (InvalidOperand(&State.State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
-    const X80SoftFloat One {&State.State, 1.0};
-    return X80SoftFloat::FYL2X(&State.State, X80SoftFloat::FADD(&State.State, Src1, One), Src2);
+    return X80SoftFloat::FYL2XP1(&State.State, Src1, Src2);
   }
 };
 
