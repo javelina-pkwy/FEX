@@ -516,7 +516,10 @@ struct FEX_PACKED X80SoftFloat {
     return X80SoftFloat(state, f128_mul(state, rhs.ToFMax(state), Log));
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FATAN(softfloat_state* state, const X80SoftFloat& lhs, const X80SoftFloat& rhs) {
+  // Not preserve_all for the same reason as FYL2XP1.
+  [[gnu::noinline]] static X80SoftFloat FATAN(softfloat_state* state, X80SoftFloat lhs, X80SoftFloat rhs) {
+    lhs = Canonical(lhs);
+    rhs = Canonical(rhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
     asm(R"(
@@ -532,8 +535,36 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    BIGFLOAT Src1_d = Canonical(lhs).ToFMax(state);
-    BIGFLOAT Src2_d = Canonical(rhs).ToFMax(state);
+    // atan(ST(1) / ST(0)) with lhs = ST(1) = y and rhs = ST(0) = x. Every special result in the SDM
+    // operand table is a multiple of pi carrying the sign of y: zero for x >= +0 on the x axis, pi
+    // for x <= -0, pi/2 on the y axis or for an infinite y against a finite x, and pi/4 or 3pi/4 for
+    // infinities in both. cephes atan2l gets several of these wrong (atan2(-0, -0) came out +0 and
+    // atan2(+inf, +inf) NaN), so only the finite non-zero case is left to it.
+    if (IsNan(lhs) || IsNan(rhs)) {
+      return extF80_add(state, lhs, rhs);
+    }
+    const bool YZero = lhs.Top.Exponent == 0 && lhs.Significand == 0;
+    const bool XZero = rhs.Top.Exponent == 0 && rhs.Significand == 0;
+    const bool YInf = lhs.Top.Exponent == 0x7FFF;
+    const bool XInf = rhs.Top.Exponent == 0x7FFF;
+    const bool YNegative = lhs.Top.Sign;
+    const bool XNegative = rhs.Top.Sign;
+    if (YZero || XInf) {
+      if (YInf) {
+        static constexpr float128_t ThreeQuarters {0x0ULL, 0x3FFE800000000000ULL};
+        return FromF128(state, XNegative ? f128_mul(state, Pi_128, ThreeQuarters) : QuarterPi_128, YNegative);
+      }
+      if (XNegative) {
+        return FromF128(state, Pi_128, YNegative);
+      }
+      return X80SoftFloat(YNegative, 0, 0);
+    }
+    if (XZero || YInf) {
+      return FromF128(state, HalfPi_128, YNegative);
+    }
+
+    BIGFLOAT Src1_d = lhs.ToFMax(state);
+    BIGFLOAT Src2_d = rhs.ToFMax(state);
     BIGFLOAT Tmp = FEXCore::cephes_128bit::atan2l(Src1_d, Src2_d);
     return X80SoftFloat(state, Tmp);
 #endif
@@ -801,8 +832,20 @@ struct FEX_PACKED X80SoftFloat {
 private:
   static constexpr uint64_t IntegerBit = (1ULL << 63);
   static constexpr uint64_t QuietBit = (1ULL << 62);
-  // ln(2) as binary128.
+  // ln(2), pi, pi/2 and pi/4 as binary128.
   static constexpr float128_t Ln2_128 {0xF35793C7673007E6ULL, 0x3FFE62E42FEFA39EULL};
+  static constexpr float128_t Pi_128 {0x8469898CC51701B8ULL, 0x4000921FB54442D1ULL};
+  static constexpr float128_t HalfPi_128 {0x8469898CC51701B8ULL, 0x3FFF921FB54442D1ULL};
+  static constexpr float128_t QuarterPi_128 {0x8469898CC51701B8ULL, 0x3FFE921FB54442D1ULL};
+
+  // Rounds a binary128 magnitude to 80 bits with the requested sign applied first, so directed
+  // rounding modes see the signed value.
+  static X80SoftFloat FromF128(softfloat_state* state, float128_t Value, bool Negative) {
+    if (Negative) {
+      Value.v[1] ^= 0x8000000000000000ULL;
+    }
+    return X80SoftFloat(state, Value);
+  }
   static constexpr uint64_t Bottom62Significand = ((1ULL << 62) - 1);
   static constexpr uint32_t ExponentBias = 16383;
 
