@@ -649,7 +649,9 @@ struct FEX_PACKED X80SoftFloat {
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FTAN(softfloat_state* state, X80SoftFloat lhs) {
+  // FPTAN, FSIN and FCOS reduce the argument the way hardware does (ReduceTrigArgument) and evaluate
+  // the reduced argument with cephes. Not preserve_all for the same reason as FYL2XP1.
+  [[gnu::noinline]] static X80SoftFloat FTAN(softfloat_state* state, X80SoftFloat lhs) {
     lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
@@ -678,17 +680,25 @@ struct FEX_PACKED X80SoftFloat {
       return lhs;
     }
 
-    const BIGFLOAT X = lhs.ToFMax(state);
-    BIGFLOAT Src_d = FEXCore::cephes_128bit::tanl(X);
-    // |tan x| > |x|: keep the direction when the cubic term is below binary128 precision.
-    if (SameBits(Src_d, X)) {
-      Src_d = NudgeAwayFromZero(Src_d);
+    const ReducedTrigArgument Arg = ReduceTrigArgument(lhs);
+    float128_t Result;
+    if (Arg.Quadrant & 1) {
+      // tan(r + pi/2) = -cos(r) / sin(r)
+      softfloat_state Scratch {};
+      Result = f128_div(&Scratch, Negate(CosReduced(Arg.R)), SinReduced(Arg.R));
+    } else {
+      Result = FEXCore::cephes_128bit::tanl(Arg.R);
+      // |tan r| > |r|: keep the direction when the cubic term is below binary128 precision.
+      if (SameBits(Result, Arg.R)) {
+        Result = NudgeAwayFromZero(Result);
+      }
     }
-    return MarkInexact(state, X80SoftFloat(state, Src_d));
+    // tan is odd.
+    return MarkInexact(state, FromF128(state, Result, lhs.Top.Sign));
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FSIN(softfloat_state* state, X80SoftFloat lhs) {
+  [[gnu::noinline]] static X80SoftFloat FSIN(softfloat_state* state, X80SoftFloat lhs) {
     lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
@@ -717,17 +727,15 @@ struct FEX_PACKED X80SoftFloat {
       return lhs;
     }
 
-    const BIGFLOAT X = lhs.ToFMax(state);
-    BIGFLOAT Src_d = FEXCore::cephes_128bit::sinl(X);
-    // |sin x| < |x|: keep the direction when the cubic term is below binary128 precision.
-    if (SameBits(Src_d, X)) {
-      Src_d = NudgeTowardZero(Src_d);
-    }
-    return MarkInexact(state, X80SoftFloat(state, Src_d));
+    const ReducedTrigArgument Arg = ReduceTrigArgument(lhs);
+    // sin(|x|) is sin r, cos r, -sin r, -cos r in quadrants 0 to 3; sin is odd.
+    const float128_t Result = (Arg.Quadrant & 1) ? CosReduced(Arg.R) : SinReduced(Arg.R);
+    const bool Negative = (lhs.Top.Sign != 0) != ((Arg.Quadrant & 2) != 0);
+    return MarkInexact(state, FromF128(state, Result, Negative));
 #endif
   }
 
-  FEXCORE_PRESERVE_ALL_ATTR static X80SoftFloat FCOS(softfloat_state* state, X80SoftFloat lhs) {
+  [[gnu::noinline]] static X80SoftFloat FCOS(softfloat_state* state, X80SoftFloat lhs) {
     lhs = Canonical(lhs);
 #ifdef DEBUG_X86_FLOAT
     BIGFLOAT Result;
@@ -757,13 +765,11 @@ struct FEX_PACKED X80SoftFloat {
       return X80SoftFloat(0, ExponentBias, IntegerBit);
     }
 
-    BIGFLOAT Src_d = FEXCore::cephes_128bit::cosl(lhs.ToFMax(state));
-    // cos x < 1 for x != 0: keep the direction when the quadratic term is below binary128 precision.
-    static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
-    if (SameBits(Src_d, one)) {
-      Src_d = NudgeTowardZero(Src_d);
-    }
-    return MarkInexact(state, X80SoftFloat(state, Src_d));
+    const ReducedTrigArgument Arg = ReduceTrigArgument(lhs);
+    // cos(|x|) is cos r, -sin r, -cos r, sin r in quadrants 0 to 3; cos is even.
+    const float128_t Result = (Arg.Quadrant & 1) ? SinReduced(Arg.R) : CosReduced(Arg.R);
+    const bool Negative = Arg.Quadrant == 1 || Arg.Quadrant == 2;
+    return MarkInexact(state, FromF128(state, Result, Negative));
 #endif
   }
 
@@ -958,6 +964,7 @@ private:
   static constexpr float128_t Pi_128 {0x8469898CC51701B8ULL, 0x4000921FB54442D1ULL};
   static constexpr float128_t HalfPi_128 {0x8469898CC51701B8ULL, 0x3FFF921FB54442D1ULL};
   static constexpr float128_t QuarterPi_128 {0x8469898CC51701B8ULL, 0x3FFE921FB54442D1ULL};
+  static constexpr float128_t One_128 {0x0ULL, 0x3FFF000000000000ULL};
 
   // Rounds a binary128 magnitude to 80 bits with the requested sign applied first, so directed
   // rounding modes see the signed value.
@@ -1046,6 +1053,87 @@ private:
 
   static float128_t NudgeAwayFromZero(float128_t Value) {
     return NudgeToward(Value, !(Value.v[1] >> 63));
+  }
+
+  static float128_t Negate(float128_t Value) {
+    Value.v[1] ^= 0x8000000000000000ULL;
+    return Value;
+  }
+
+  struct ReducedTrigArgument {
+    float128_t R;      // |x| minus the nearest multiple of pi66/2, so within +-pi66/4
+    uint32_t Quadrant; // that multiple modulo 4
+  };
+
+  // The x87 reduces trigonometric arguments below 2^63 with a 66 significant bit approximation of pi
+  // (pi/4 = 0.C90FDAA22168C234C hex; Intel SDM Vol. 1, "Pi"), and AMD produces the same values. The
+  // reduced argument is exact with respect to that constant, so relative to the true pi the result is
+  // off by about k * 2^-67, which dominates once the argument is large and shows up as a handful of
+  // significant bits when the argument is close to a multiple of pi. cephes reduces with a full
+  // precision pi, so the reduction is done here and cephes only sees |r| <= pi/4.
+  // Returns the exact reduced argument of |x|, which has at most 67 significant bits.
+  static ReducedTrigArgument ReduceTrigArgument(const X80SoftFloat& lhs) {
+    // pi66/2 scaled by 2^67.
+    constexpr unsigned __int128 HalfPi66 = (static_cast<unsigned __int128>(0xC) << 64) | 0x90FDAA22168C234CULL;
+    softfloat_state Exact {};
+    const X80SoftFloat Magnitude {0, lhs.Top.Exponent, lhs.Significand};
+    const int32_t Exp = static_cast<int32_t>(lhs.Top.Exponent) - static_cast<int32_t>(ExponentBias);
+    if (Exp < -1 || Exp >= 63) {
+      // Below 1/2 there is nothing to reduce; hardware does not reduce at or above 2^63 at all.
+      return {Magnitude.ToFMax(&Exact), 0};
+    }
+    // |x| * 2^67 = Significand << Shift with Shift in 3..66. The nearest multiple
+    // k = round(|x| * 2^67 / HalfPi66) is found in two steps so that nothing exceeds 128 bits.
+    const uint32_t Shift = Exp + 4;
+    const uint32_t Base = Shift < 62 ? Shift : 62;
+    const uint32_t Rest = Shift - Base;
+    const unsigned __int128 Sig = lhs.Significand;
+    const unsigned __int128 Scaled = Sig << Base;
+    const unsigned __int128 Partial = (Scaled % HalfPi66) << Rest;
+    unsigned __int128 K = ((Scaled / HalfPi66) << Rest) + Partial / HalfPi66;
+    if (2 * (Partial % HalfPi66) >= HalfPi66) {
+      ++K;
+    }
+    // The reduced argument is below 2^67 in magnitude, so the difference modulo 2^128 is exact.
+    const __int128 Reduced = static_cast<__int128>((Sig << Shift) - K * HalfPi66);
+    return {FromScaledInt(Reduced, -67), static_cast<uint32_t>(K & 3)};
+  }
+
+  // Value * 2^Shift as binary128, exact for |Value| < 2^113.
+  static float128_t FromScaledInt(__int128 Value, int32_t Shift) {
+    float128_t Result {0, 0};
+    if (Value == 0) {
+      return Result;
+    }
+    const bool Negative = Value < 0;
+    unsigned __int128 Mag = Negative ? -static_cast<unsigned __int128>(Value) : static_cast<unsigned __int128>(Value);
+    const uint64_t Hi = static_cast<uint64_t>(Mag >> 64);
+    const int LeadingZeros = Hi ? std::countl_zero(Hi) : 64 + std::countl_zero(static_cast<uint64_t>(Mag));
+    // Move the leading bit to bit 112, the implicit integer bit of binary128.
+    Mag <<= LeadingZeros - 15;
+    const int32_t Exp = 127 - LeadingZeros + Shift;
+    Result.v[0] = static_cast<uint64_t>(Mag);
+    Result.v[1] = (static_cast<uint64_t>(Mag >> 64) & 0xFFFFFFFFFFFFULL) | (static_cast<uint64_t>(Exp + 16383) << 48) |
+                  (Negative ? 0x8000000000000000ULL : 0);
+    return Result;
+  }
+
+  // sin and cos of a reduced argument, keeping the direction when the result rounds to its leading
+  // term in binary128 (sin r to r, cos r to 1) so that directed rounding sees an inexact value.
+  static float128_t SinReduced(float128_t R) {
+    float128_t Result = FEXCore::cephes_128bit::sinl(R);
+    if (SameBits(Result, R)) {
+      Result = NudgeTowardZero(Result);
+    }
+    return Result;
+  }
+
+  static float128_t CosReduced(float128_t R) {
+    float128_t Result = FEXCore::cephes_128bit::cosl(R);
+    if (SameBits(Result, One_128)) {
+      Result = NudgeTowardZero(Result);
+    }
+    return Result;
   }
   static constexpr uint64_t Bottom62Significand = ((1ULL << 62) - 1);
   static constexpr uint32_t ExponentBias = 16383;
