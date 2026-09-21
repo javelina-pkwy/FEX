@@ -421,23 +421,26 @@ struct FEX_PACKED X80SoftFloat {
     // exp2(x) - 1 cancels catastrophically once |x| is small: exp2(x) rounds to 1 while the true
     // result is x*ln2 + O(x^2). Below 2^-32 evaluate the Taylor series t + t^2/2 + t^3/6 with
     // t = x*ln2 instead; the omitted t^4/24 term is around 2^-100 relative, far below the target.
+    // Intermediate binary128 arithmetic runs on a scratch state; only the final 80-bit rounding
+    // reports flags.
+    softfloat_state Scratch = *state;
     if (lhs.Top.Exponent < ExponentBias - 32) {
       static const float128_t half {0x0ULL, 0x3ffe000000000000ULL};
       static const float128_t sixth {0x5555555555555555ULL, 0x3FFC555555555555ULL};
-      const float128_t t = f128_mul(state, Src1_d, Ln2_128);
-      float128_t poly = f128_add(state, half, f128_mul(state, t, sixth));
-      poly = f128_add(state, one, f128_mul(state, t, poly));
-      float128_t Result = f128_mul(state, t, poly);
+      const float128_t t = f128_mul(&Scratch, Src1_d, Ln2_128);
+      float128_t poly = f128_add(&Scratch, half, f128_mul(&Scratch, t, sixth));
+      poly = f128_add(&Scratch, one, f128_mul(&Scratch, t, poly));
+      float128_t Result = f128_mul(&Scratch, t, poly);
       // 2^x - 1 > x*ln2 for either sign of x: keep the direction when the quadratic term is below
       // binary128 precision.
       if (SameBits(Result, t)) {
         Result = NudgeToward(Result, true);
       }
-      return X80SoftFloat(state, Result);
+      return MarkInexact(state, X80SoftFloat(state, Result));
     }
 
     auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
-    return X80SoftFloat(state, f128_sub(state, Result, one));
+    return MarkInexact(state, X80SoftFloat(state, f128_sub(&Scratch, Result, one)));
 #endif
   }
 
@@ -486,8 +489,9 @@ struct FEX_PACKED X80SoftFloat {
     auto Src1_d = lhs.ToFMax(state);
     auto Src2_d = rhs.ToFMax(state);
 
-    auto Tmp = f128_mul(state, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
-    return X80SoftFloat(state, Tmp);
+    softfloat_state Scratch = *state;
+    auto Tmp = f128_mul(&Scratch, Src2_d, FEXCore::cephes_128bit::log2l(Src1_d));
+    return MarkInexact(state, X80SoftFloat(state, Tmp));
 #endif
   }
 
@@ -531,16 +535,17 @@ struct FEX_PACKED X80SoftFloat {
     // log2(1 + x) = log2(u) * (x / (u - 1)), and fall back to x / ln2 when u rounds to 1. The ratio
     // is formed first because log2(u) * x overflows for x near the largest finite value.
     static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
+    softfloat_state Scratch = *state;
     const float128_t X = lhs.ToFMax(state);
-    const float128_t U = f128_add(state, one, X);
+    const float128_t U = f128_add(&Scratch, one, X);
     float128_t Log;
     if (U.v[0] == one.v[0] && U.v[1] == one.v[1]) {
       // log2(1 + x) < x/ln2 for either sign of x once the quadratic term is below binary128 precision.
-      Log = NudgeToward(f128_div(state, X, Ln2_128), false);
+      Log = NudgeToward(f128_div(&Scratch, X, Ln2_128), false);
     } else {
-      Log = f128_mul(state, FEXCore::cephes_128bit::log2l(U), f128_div(state, X, f128_sub(state, U, one)));
+      Log = f128_mul(&Scratch, FEXCore::cephes_128bit::log2l(U), f128_div(&Scratch, X, f128_sub(&Scratch, U, one)));
     }
-    return X80SoftFloat(state, f128_mul(state, rhs.ToFMax(state), Log));
+    return MarkInexact(state, X80SoftFloat(state, f128_mul(&Scratch, rhs.ToFMax(state), Log)));
   }
 
   // Not preserve_all for the same reason as FYL2XP1.
@@ -579,7 +584,8 @@ struct FEX_PACKED X80SoftFloat {
     if (YZero || XInf) {
       if (YInf) {
         static constexpr float128_t ThreeQuarters {0x0ULL, 0x3FFE800000000000ULL};
-        return FromF128(state, XNegative ? f128_mul(state, Pi_128, ThreeQuarters) : QuarterPi_128, YNegative);
+        softfloat_state Scratch = *state;
+        return FromF128(state, XNegative ? f128_mul(&Scratch, Pi_128, ThreeQuarters) : QuarterPi_128, YNegative);
       }
       if (XNegative) {
         return FromF128(state, Pi_128, YNegative);
@@ -599,7 +605,7 @@ struct FEX_PACKED X80SoftFloat {
     if (SameBits(Tmp, f128_div(&Scratch, Src1_d, Src2_d))) {
       Tmp = NudgeTowardZero(Tmp);
     }
-    return X80SoftFloat(state, Tmp);
+    return MarkInexact(state, X80SoftFloat(state, Tmp));
 #endif
   }
 
@@ -638,7 +644,7 @@ struct FEX_PACKED X80SoftFloat {
     if (SameBits(Src_d, X)) {
       Src_d = NudgeAwayFromZero(Src_d);
     }
-    return X80SoftFloat(state, Src_d);
+    return MarkInexact(state, X80SoftFloat(state, Src_d));
 #endif
   }
 
@@ -677,7 +683,7 @@ struct FEX_PACKED X80SoftFloat {
     if (SameBits(Src_d, X)) {
       Src_d = NudgeTowardZero(Src_d);
     }
-    return X80SoftFloat(state, Src_d);
+    return MarkInexact(state, X80SoftFloat(state, Src_d));
 #endif
   }
 
@@ -706,13 +712,18 @@ struct FEX_PACKED X80SoftFloat {
       return extF80_add(state, lhs, lhs);
     }
 
+    // cos(+-0) is exactly 1.
+    if (lhs.Top.Exponent == 0 && lhs.Significand == 0) {
+      return X80SoftFloat(0, ExponentBias, IntegerBit);
+    }
+
     BIGFLOAT Src_d = FEXCore::cephes_128bit::cosl(lhs.ToFMax(state));
     // cos x < 1 for x != 0: keep the direction when the quadratic term is below binary128 precision.
     static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
-    if (SameBits(Src_d, one) && !(lhs.Top.Exponent == 0 && lhs.Significand == 0)) {
+    if (SameBits(Src_d, one)) {
       Src_d = NudgeTowardZero(Src_d);
     }
-    return X80SoftFloat(state, Src_d);
+    return MarkInexact(state, X80SoftFloat(state, Src_d));
 #endif
   }
 
@@ -919,6 +930,16 @@ private:
 
   static bool SameBits(float128_t a, float128_t b) {
     return a.v[0] == b.v[0] && a.v[1] == b.v[1];
+  }
+
+  // Hardware evaluates the transcendentals iteratively and reports every finite non-zero result as
+  // inexact, even one that happens to be exactly representable (log2 of a power of two).
+  static X80SoftFloat MarkInexact(softfloat_state* state, X80SoftFloat Result) {
+    const bool Zero = Result.Top.Exponent == 0 && Result.Significand == 0;
+    if (!Zero && Result.Top.Exponent != 0x7FFF) {
+      state->exceptionFlags |= softfloat_flag_inexact;
+    }
+    return Result;
   }
 
   // Moves a finite non-zero binary128 value one ulp toward +inf or -inf. When a transcendental

@@ -59,6 +59,12 @@ public:
 
   FEXCORE_PRESERVE_ALL_ATTR ~ScopedSoftFloatState() {
     HandleX87Exception(State, Frame);
+    // #D is raised for a denormal operand only when the operation actually consumed it: not when
+    // the operation is invalid, when a quiet NaN operand short-circuits it, or when the handler
+    // marked another short-circuit (a zero dividend, a zero FYL2X argument).
+    if (DenormalOperand && !NaNOperand && !SuppressDenormal && !(State.exceptionFlags & softfloat_flag_invalid)) {
+      Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] = 1;
+    }
   }
 
   // Disable copy and move to ensure RAII semantics
@@ -69,11 +75,14 @@ public:
 
   softfloat_state State;
   FEXCore::Core::CpuStateFrame* Frame;
+  bool DenormalOperand = false;
+  bool NaNOperand = false;
+  bool SuppressDenormal = false;
 };
 
 // The x87 raises #IA for pseudo-NaN, pseudo-infinity and unnormal operands instead of computing
-// with them; the masked result is the QNaN indefinite. Otherwise a denormal or pseudo-denormal
-// operand raises #D (invalid operands take precedence, as on hardware).
+// with them; the masked result is the QNaN indefinite. Denormal and NaN operands are recorded for
+// the #D decision made when the state goes out of scope.
 FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(ScopedSoftFloatState& State, const X80SoftFloat& Src1, const X80SoftFloat* Src2 = nullptr) {
   const auto Denormal = [](const X80SoftFloat& Src) {
     return Src.Top.Exponent == 0 && Src.Significand != 0;
@@ -82,9 +91,8 @@ FEXCORE_PRESERVE_ALL_ATTR static bool InvalidOperand(ScopedSoftFloatState& State
     State.State.exceptionFlags |= softfloat_flag_invalid;
     return true;
   }
-  if (Denormal(Src1) || (Src2 && Denormal(*Src2))) {
-    State.Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] = 1;
-  }
+  State.DenormalOperand = Denormal(Src1) || (Src2 && Denormal(*Src2));
+  State.NaNOperand = X80SoftFloat::IsNan(Src1) || (Src2 && X80SoftFloat::IsNan(*Src2));
   return false;
 }
 
@@ -428,6 +436,9 @@ struct OpHandlers<IR::OP_F80DIV> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
+    // A zero dividend short-circuits without consuming the divisor.
+    const X80SoftFloat Dividend = Src1;
+    State.SuppressDenormal = Dividend.Top.Exponent == 0 && Dividend.Significand == 0;
     return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FDIV(S, Src1, Src2); });
   }
 };
@@ -440,6 +451,9 @@ struct OpHandlers<IR::OP_F80FYL2X> {
     if (InvalidOperand(State, Src1, Src2)) {
       return X80SoftFloat::Indefinite();
     }
+    // log2(0) short-circuits to an infinity without consuming ST(1).
+    const X80SoftFloat X = Src1;
+    State.SuppressDenormal = X.Top.Exponent == 0 && X.Significand == 0;
     return WithRoundUp(State, [&](softfloat_state* S) { return X80SoftFloat::FYL2X(S, Src1, Src2); });
   }
 };
