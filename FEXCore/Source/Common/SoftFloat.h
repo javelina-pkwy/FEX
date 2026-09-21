@@ -383,10 +383,35 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    auto Src1_d = Canonical(lhs).ToFMax(state);
-    auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
+    // NaNs propagate (a signaling one raises invalid), zero keeps its sign, 2^(+inf)-1 is +inf and
+    // 2^(-inf)-1 is -1.
+    if (IsNan(lhs)) {
+      return extF80_add(state, lhs, lhs);
+    }
+    if (lhs.Top.Exponent == 0 && lhs.Significand == 0) {
+      return lhs;
+    }
+    if (lhs.Top.Exponent == 0x7FFF) {
+      return lhs.Top.Sign ? X80SoftFloat(1, 0x3FFF, 0x8000000000000000ULL) : lhs;
+    }
 
+    auto Src1_d = Canonical(lhs).ToFMax(state);
     static const float128_t one {0x0ULL, 0x3fff000000000000ULL};
+
+    // exp2(x) - 1 cancels catastrophically once |x| is small: exp2(x) rounds to 1 while the true
+    // result is x*ln2 + O(x^2). Below 2^-32 evaluate the Taylor series t + t^2/2 + t^3/6 with
+    // t = x*ln2 instead; the omitted t^4/24 term is around 2^-100 relative, far below the target.
+    if (lhs.Top.Exponent < ExponentBias - 32) {
+      static const float128_t ln2 {0xF35793C7673007E6ULL, 0x3FFE62E42FEFA39EULL};
+      static const float128_t half {0x0ULL, 0x3ffe000000000000ULL};
+      static const float128_t sixth {0x5555555555555555ULL, 0x3FFC555555555555ULL};
+      const float128_t t = f128_mul(state, Src1_d, ln2);
+      float128_t poly = f128_add(state, half, f128_mul(state, t, sixth));
+      poly = f128_add(state, one, f128_mul(state, t, poly));
+      return X80SoftFloat(state, f128_mul(state, t, poly));
+    }
+
+    auto Result = FEXCore::cephes_128bit::exp2l(Src1_d);
     return X80SoftFloat(state, f128_sub(state, Result, one));
 #endif
   }
