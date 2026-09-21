@@ -16,6 +16,11 @@
 extern "C" {
 #include "SoftFloat-3e/platform.h"
 #include "SoftFloat-3e/softfloat.h"
+
+// Internal to SoftFloat-3e (not in its public header): normalizes sig, then rounds and packs the
+// value sig * 2^(exp - bias - 63) once, handling overflow, underflow and denormals per state.
+FEXCORE_PRESERVE_ALL_ATTR extFloat80_t softfloat_normRoundPackToExtF80(
+  struct softfloat_state* state, bool sign, int_fast32_t exp, uint_fast64_t sig, uint_fast64_t sigExtra, uint_fast8_t roundingPrecision);
 }
 
 struct FEX_PACKED X80SoftFloat {
@@ -348,23 +353,42 @@ struct FEX_PACKED X80SoftFloat {
 
     return Result;
 #else
-    extFloat80_t Zero {0, 0};
-    if (extF80_eq(state, lhs, Zero)) {
-      // FSCALE(0, +Inf) is 0 * Inf, which is invalid. FSCALE(0, anything
-      // else) is still 0.
-      if (rhs.Top.Exponent == 0x7FFF && rhs.Top.Sign == 0 && (rhs.Significand & 0x7FFFFFFFFFFFFFFFULL) == 0) {
+    // ST(0) * 2^trunc(ST(1)). NaNs propagate; extF80_mul raises invalid only for a signaling one.
+    if (IsNan(lhs) || IsNan(rhs)) {
+      return extF80_mul(state, lhs, rhs);
+    }
+    const bool XZero = lhs.Top.Exponent == 0 && lhs.Significand == 0;
+    const bool XInf = lhs.Top.Exponent == 0x7FFF;
+    if (rhs.Top.Exponent == 0x7FFF) {
+      // 0 * 2^+inf and inf * 2^-inf are invalid. Otherwise an infinite scale yields a signed infinity
+      // or zero exactly, without the overflow rounding a finite scale would go through.
+      if ((XZero && !rhs.Top.Sign) || (XInf && rhs.Top.Sign)) {
         state->exceptionFlags |= softfloat_flag_invalid;
-        X80SoftFloat QNaN(0, 0x7FFFUL, 0xC000000000000000ULL);
-        return QNaN;
+        return Indefinite();
       }
+      if (XZero || XInf) {
+        return lhs;
+      }
+      return rhs.Top.Sign ? X80SoftFloat(lhs.Top.Sign, 0, 0) : X80SoftFloat(lhs.Top.Sign, 0x7FFF, IntegerBit);
+    }
+    if (XZero || XInf) {
       return lhs;
     }
-    X80SoftFloat Int = FRNDINT(state, rhs, softfloat_round_minMag);
-    BIGFLOAT Src2_d = Int.ToFMax(state);
-    Src2_d = FEXCore::cephes_128bit::exp2l(Src2_d);
-    X80SoftFloat Src2_X80(state, Src2_d);
-    X80SoftFloat Result = extF80_mul(state, lhs, Src2_X80);
-    return Result;
+
+    // A |ST(1)| of 2^16 or more scales past both ends of the exponent range; saturating the truncated
+    // scale keeps the exponent arithmetic in range without changing the result.
+    int_fast32_t Scale;
+    if (rhs.Top.Exponent >= ExponentBias + 16) {
+      Scale = rhs.Top.Sign ? -65536 : 65536;
+    } else {
+      Scale = extF80_to_i32(state, rhs, softfloat_round_minMag, false);
+    }
+
+    // The scaled value is exact, so a single round-and-pack of the shifted exponent gives the
+    // overflow, underflow and denormal behaviour of the control word. A denormal ST(0) has the
+    // biased exponent of 1 its significand encoding implies.
+    const int_fast32_t Exponent = (lhs.Top.Exponent == 0 ? 1 : lhs.Top.Exponent) + Scale;
+    return softfloat_normRoundPackToExtF80(state, lhs.Top.Sign, Exponent, lhs.Significand, 0, state->roundingPrecision);
 #endif
   }
 
