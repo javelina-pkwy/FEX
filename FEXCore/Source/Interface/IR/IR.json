@@ -2647,6 +2647,43 @@
         "ElementSize": "ElementSize",
         "TiedSource": 2
       },
+      "FPR = VFMLAMul OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Vector1, FPR:$Vector2, FPR:$Addend": {
+        "Desc": [
+          "Dest = (Vector1 * Vector2) + Addend",
+          "Same as VFMLA but tied to Vector1: for x86 FMA forms that overwrite a multiplicand (132/213).",
+          "Lowers to SVE FMAD in place instead of shuffling the addend through the destination."
+        ],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "TiedSource": 0
+      },
+      "FPR = VFMLSMul OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Vector1, FPR:$Vector2, FPR:$Addend": {
+        "Desc": [
+          "Dest = (Vector1 * Vector2) - Addend",
+          "Same as VFMLS but tied to Vector1 (SVE FNMSB)."
+        ],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "TiedSource": 0
+      },
+      "FPR = VFNMLAMul OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Vector1, FPR:$Vector2, FPR:$Addend": {
+        "Desc": [
+          "Dest = (-Vector1 * Vector2) + Addend",
+          "Same as VFNMLA but tied to Vector1 (SVE FMSB)."
+        ],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "TiedSource": 0
+      },
+      "FPR = VFNMLSMul OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$Vector1, FPR:$Vector2, FPR:$Addend": {
+        "Desc": [
+          "Dest = (-Vector1 * Vector2) - Addend",
+          "Same as VFNMLS but tied to Vector1 (SVE FNMAD)."
+        ],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "TiedSource": 0
+      },
       "FPR = VBlendImm OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$LHS, FPR:$RHS, u16:$Selector": {
         "Desc": [
           "Functions the same way an immediate blend operation on x86 would.",

@@ -1984,14 +1984,28 @@ void OpDispatchBuilder::AVX128_VFMAImpl(OpcodeArgs, IROps IROp, uint8_t Src1Idx,
 
   RefPair Sources[3] = {Dest, Src1, Src2};
 
+  // The 132/213 forms overwrite a multiplicand. Use the multiplicand-tied ops so the result lands
+  // in the destination directly rather than shuffling the addend through a temporary.
+  IROps SelectedOp = IROp;
+  uint8_t V1Idx = Src1Idx;
+  uint8_t V2Idx = Src2Idx;
+  if (AddendIdx != 1) {
+    SelectedOp = IROp == OP_VFMLA  ? OP_VFMLAMUL :
+                 IROp == OP_VFMLS  ? OP_VFMLSMUL :
+                 IROp == OP_VFNMLA ? OP_VFNMLAMUL :
+                                     OP_VFNMLSMUL;
+    V1Idx = 1;
+    V2Idx = Src1Idx == 1 ? Src2Idx : Src1Idx;
+  }
+
   RefPair Result {};
-  DeriveOp(Result_Low, IROp, _VFMLA(OpSize::i128Bit, ElementSize, Sources[Src1Idx - 1].Low, Sources[Src2Idx - 1].Low, Sources[AddendIdx - 1].Low));
+  DeriveOp(Result_Low, SelectedOp, _VFMLA(OpSize::i128Bit, ElementSize, Sources[V1Idx - 1].Low, Sources[V2Idx - 1].Low, Sources[AddendIdx - 1].Low));
   Result.Low = Result_Low;
   if (Is128Bit) {
     Result.High = LoadZeroVector(OpSize::i128Bit);
   } else {
-    DeriveOp(Result_High, IROp,
-             _VFMLA(OpSize::i128Bit, ElementSize, Sources[Src1Idx - 1].High, Sources[Src2Idx - 1].High, Sources[AddendIdx - 1].High));
+    DeriveOp(Result_High, SelectedOp,
+             _VFMLA(OpSize::i128Bit, ElementSize, Sources[V1Idx - 1].High, Sources[V2Idx - 1].High, Sources[AddendIdx - 1].High));
     Result.High = Result_High;
   }
   AVX128_StoreResult_WithOpSize(Op, Op->Dest, Result);

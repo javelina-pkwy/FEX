@@ -196,7 +196,7 @@ namespace FEXCore::CPU {
     VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2);                         \
   }
 
-#define DEF_FMAOP_SCALAR_INSERT(FEXOp, ARMOp)                                                                                \
+#define DEF_FMAOP_SCALAR_INSERT(FEXOp, ARMOp, SVEOp)                                                                         \
   DEF_OP(FEXOp) {                                                                                                            \
     const auto Op = IROp->C<IR::IROp_##FEXOp>();                                                                             \
     const auto ElementSize = Op->Header.ElementSize;                                                                         \
@@ -211,6 +211,10 @@ namespace FEXCore::CPU {
         ARMOp(Dst.D(), Src1.D(), Src2.D(), Src3.D());                                                                        \
       }                                                                                                                      \
     };                                                                                                                       \
+    auto SVEEmit = [this](ARMEmitter::SubRegSize Size, ARMEmitter::ZRegister Dst, ARMEmitter::PRegisterMerge Pg,             \
+                          ARMEmitter::ZRegister Multiplicand, ARMEmitter::ZRegister Addend) {                                \
+      SVEOp(Size, Dst, Pg, Multiplicand, Addend);                                                                            \
+    };                                                                                                                       \
                                                                                                                              \
     const auto Dst = GetVReg(Node);                                                                                          \
     const auto Upper = GetVReg(Op->Upper);                                                                                   \
@@ -218,7 +222,7 @@ namespace FEXCore::CPU {
     const auto Vector2 = GetVReg(Op->Vector2);                                                                               \
     const auto Addend = GetVReg(Op->Addend);                                                                                 \
                                                                                                                              \
-    VFScalarFMAOperation(IROp->Size, ElementSize, ScalarEmit, Dst, Upper, Vector1, Vector2, Addend);                         \
+    VFScalarFMAOperation(IROp->Size, ElementSize, ScalarEmit, SVEEmit, Dst, Upper, Vector1, Vector2, Addend);                \
   }
 
 DEF_UNOP(VAbs, abs, true)
@@ -257,14 +261,16 @@ DEF_FBINOP_SCALAR_INSERT(VFSubScalarInsert, fsub)
 DEF_FBINOP_SCALAR_INSERT(VFMulScalarInsert, fmul)
 DEF_FBINOP_SCALAR_INSERT(VFDivScalarInsert, fdiv)
 
-DEF_FMAOP_SCALAR_INSERT(VFMLAScalarInsert, fmadd)
-DEF_FMAOP_SCALAR_INSERT(VFMLSScalarInsert, fnmsub)
-DEF_FMAOP_SCALAR_INSERT(VFNMLAScalarInsert, fmsub)
-DEF_FMAOP_SCALAR_INSERT(VFNMLSScalarInsert, fnmadd)
+// ASIMD scalar:  fmadd = Sa + Sn*Sm   fnmsub = -Sa + Sn*Sm   fmsub = Sa - Sn*Sm   fnmadd = -Sa - Sn*Sm
+// SVE (Zdn multiplicand): fmad = Za + Zdn*Zm   fnmsb = -Za + Zdn*Zm   fmsb = Za - Zdn*Zm   fnmad = -Za - Zdn*Zm
+DEF_FMAOP_SCALAR_INSERT(VFMLAScalarInsert, fmadd, fmad)
+DEF_FMAOP_SCALAR_INSERT(VFMLSScalarInsert, fnmsub, fnmsb)
+DEF_FMAOP_SCALAR_INSERT(VFNMLAScalarInsert, fmsub, fmsb)
+DEF_FMAOP_SCALAR_INSERT(VFNMLSScalarInsert, fnmadd, fnmad)
 
-void Arm64JITCore::VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSize, ScalarFMAOpCaller ScalarEmit, ARMEmitter::VRegister Dst,
-                                        ARMEmitter::VRegister Upper, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
-                                        ARMEmitter::VRegister Addend) {
+void Arm64JITCore::VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSize, ScalarFMAOpCaller ScalarEmit,
+                                        ScalarFMASVEOpCaller SVEEmit, ARMEmitter::VRegister Dst, ARMEmitter::VRegister Upper,
+                                        ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2, ARMEmitter::VRegister Addend) {
   LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i128Bit, "256-bit unsupported", __func__);
 
   LOGMAN_THROW_A_FMT(ElementSize == IR::OpSize::i16Bit || ElementSize == IR::OpSize::i32Bit || ElementSize == IR::OpSize::i64Bit, "Invalid "
@@ -282,6 +288,13 @@ void Arm64JITCore::VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSiz
     ///< Exactly matches ARM scalar FMA semantics
     // If the host CPU supports AFP then scalar does an insert without modifying upper bits.
     ScalarEmit(Dst, Vector1, Vector2, Addend);
+  } else if (HostSupportsSVE128 && (Dst == Vector1 || Dst == Vector2)) {
+    // x86 132/213 forms: the destination is a multiplicand. SVE's destructive FMA with merging
+    // predication on element 0 computes that directly and leaves the other elements alone,
+    // keeping the insert off the dependency chain.
+    const auto Multiplicand = Dst == Vector1 ? Vector2 : Vector1;
+    ptrue(SubRegSize.Vector, ARMEmitter::PReg::p0, ARMEmitter::PredicatePattern::SVE_VL1);
+    SVEEmit(SubRegSize.Vector, Dst.Z(), ARMEmitter::PReg::p0.Merging(), Multiplicand.Z(), Addend.Z());
   } else {
     // Host doesn't support AFP, need to emit in to a temporary then insert.
     ScalarEmit(VTMP1, Vector1, Vector2, Addend);
@@ -4479,6 +4492,69 @@ DEF_OP(VFCADD) {
       fcadd(SubRegSize, Dst.Q(), Vector1.Q(), Vector2.Q(), Rotate);
     }
   }
+}
+
+void Arm64JITCore::VFMultiplicandFMAOperation(const IR::IROp_Header* IROp, IR::Ref Node, ScalarFMASVEOpCaller SVEEmit, OpType Fallback) {
+  static_assert(sizeof(IR::IROp_VFMLAMul) == sizeof(IR::IROp_VFMLA) && sizeof(IR::IROp_VFMLSMul) == sizeof(IR::IROp_VFMLS) &&
+                  sizeof(IR::IROp_VFNMLAMul) == sizeof(IR::IROp_VFNMLA) && sizeof(IR::IROp_VFNMLSMul) == sizeof(IR::IROp_VFNMLS),
+                "the fallback handlers read the operands through the accumulator-tied op layout");
+  const auto Op = IROp->C<IR::IROp_VFMLAMul>();
+  const auto OpSize = IROp->Size;
+  const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
+  const bool UseSVE = Is256Bit ? HostSupportsSVE256 : (HostSupportsSVE128 && OpSize == IR::OpSize::i128Bit && IROp->ElementSize != OpSize);
+  if (!UseSVE) {
+    (this->*Fallback)(IROp, Node);
+    return;
+  }
+
+  const auto SubRegSize = ConvertSubRegSize248(IROp);
+  const auto Mask = Is256Bit ? PRED_TMP_32B.Merging() : PRED_TMP_16B.Merging();
+  const auto Dst = GetVReg(Node);
+  auto Vector1 = GetVReg(Op->Vector1);
+  auto Vector2 = GetVReg(Op->Vector2);
+  auto Addend = GetVReg(Op->Addend);
+
+  // The SVE op is destructive on a multiplicand, so get one of them into Dst.
+  if (Dst == Vector2) {
+    std::swap(Vector1, Vector2);
+  }
+  if (Dst != Vector1) {
+    if (Dst == Addend) {
+      if (Is256Bit) {
+        mov(VTMP1.Z(), Addend.Z());
+      } else {
+        mov(VTMP1.Q(), Addend.Q());
+      }
+      Addend = VTMP1;
+    }
+    if (Is256Bit) {
+      mov(Dst.Z(), Vector1.Z());
+    } else {
+      mov(Dst.Q(), Vector1.Q());
+    }
+  }
+  SVEEmit(SubRegSize, Dst.Z(), Mask, Vector2.Z(), Addend.Z());
+}
+
+// SVE (Zdn multiplicand): fmad = Za + Zdn*Zm   fnmsb = -Za + Zdn*Zm   fmsb = Za - Zdn*Zm   fnmad = -Za - Zdn*Zm
+DEF_OP(VFMLAMul) {
+  VFMultiplicandFMAOperation(
+    IROp, Node, [this](auto Size, auto Zdn, auto Pg, auto Zm, auto Za) { fmad(Size, Zdn, Pg, Zm, Za); }, &Arm64JITCore::Op_VFMLA);
+}
+
+DEF_OP(VFMLSMul) {
+  VFMultiplicandFMAOperation(
+    IROp, Node, [this](auto Size, auto Zdn, auto Pg, auto Zm, auto Za) { fnmsb(Size, Zdn, Pg, Zm, Za); }, &Arm64JITCore::Op_VFMLS);
+}
+
+DEF_OP(VFNMLAMul) {
+  VFMultiplicandFMAOperation(
+    IROp, Node, [this](auto Size, auto Zdn, auto Pg, auto Zm, auto Za) { fmsb(Size, Zdn, Pg, Zm, Za); }, &Arm64JITCore::Op_VFNMLA);
+}
+
+DEF_OP(VFNMLSMul) {
+  VFMultiplicandFMAOperation(
+    IROp, Node, [this](auto Size, auto Zdn, auto Pg, auto Zm, auto Za) { fnmad(Size, Zdn, Pg, Zm, Za); }, &Arm64JITCore::Op_VFNMLS);
 }
 
 DEF_OP(VFMLA) {

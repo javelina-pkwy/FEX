@@ -615,9 +615,14 @@ private:
 
   using ScalarFMAOpCaller =
     std::function<void(ARMEmitter::VRegister Dst, ARMEmitter::VRegister Src1, ARMEmitter::VRegister Src2, ARMEmitter::VRegister Src3)>;
-  void VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSize, ScalarFMAOpCaller ScalarEmit, ARMEmitter::VRegister Dst,
-                            ARMEmitter::VRegister Upper, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
-                            ARMEmitter::VRegister Addend);
+  // SVE predicated form: Dst is a multiplicand and only the governed element is written.
+  using ScalarFMASVEOpCaller = std::function<void(ARMEmitter::SubRegSize Size, ARMEmitter::ZRegister Dst, ARMEmitter::PRegisterMerge Pg,
+                                                  ARMEmitter::ZRegister Multiplicand, ARMEmitter::ZRegister Addend)>;
+  void VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSize, ScalarFMAOpCaller ScalarEmit, ScalarFMASVEOpCaller SVEEmit,
+                            ARMEmitter::VRegister Dst, ARMEmitter::VRegister Upper, ARMEmitter::VRegister Vector1,
+                            ARMEmitter::VRegister Vector2, ARMEmitter::VRegister Addend);
+  // Vector FMA where the destination is a multiplicand (VF*Mul ops): SVE in place, else the accumulator-tied fallback.
+  void VFMultiplicandFMAOperation(const IR::IROp_Header* IROp, IR::Ref Node, ScalarFMASVEOpCaller SVEEmit, OpType Fallback);
   using ScalarBinaryOpCaller = std::function<void(ARMEmitter::VRegister Dst, ARMEmitter::VRegister Src1, ARMEmitter::VRegister Src2)>;
   void VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarBinaryOpCaller ScalarEmit,
                          ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2);
