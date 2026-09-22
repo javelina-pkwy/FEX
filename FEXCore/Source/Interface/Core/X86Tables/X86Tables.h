@@ -65,6 +65,13 @@ namespace DecodeFlags {
   constexpr uint32_t FLAG_OPADDR_FLAG_SIZE = 2;
   constexpr uint32_t FLAG_OPADDR_MASK = (((1 << FLAG_OPADDR_STACKSIZE) - 1) << FLAG_OPADDR_OFF);
 
+  // Leaf call inlining (see Frontend::Decoder). A direct CALL whose callee is a short
+  // straight-line sequence ending in RET is decoded in place: the callee's instructions
+  // follow the CALL in the same block and the RET falls through to the caller.
+  constexpr uint32_t FLAG_INLINED_CALL = (1U << 29); // CALL that only pushes its return address
+  constexpr uint32_t FLAG_INLINED_RET = (1U << 30);  // RET that pops, verifies and falls through
+  constexpr uint32_t FLAG_INLINED = (1U << 31);      // Any instruction decoded as part of an inlined callee
+
   // 00 = NONE
   constexpr uint32_t FLAG_OPERAND_SIZE_LAST = 0b01;
   constexpr uint32_t FLAG_WIDENING_SIZE_LAST = 0b10;
@@ -226,6 +233,9 @@ struct DecodedOperand {
 
 struct DecodedInst {
   uint64_t PC;
+
+  // For FLAG_INLINED_RET: the caller's return address (the instruction after the inlined CALL).
+  uint64_t InlineReturnRIP;
 
   DecodedOperand Dest;
   DecodedOperand Src[3];

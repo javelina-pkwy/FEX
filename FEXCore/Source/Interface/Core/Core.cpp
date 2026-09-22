@@ -602,12 +602,19 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
       uint64_t BlockInstructionsLength {};
       for (size_t i = 0; i < InstsInBlock; ++i) {
-        uint64_t InstAddress = Block.Entry + BlockInstructionsLength;
         const FEXCore::X86Tables::X86InstInfo* TableInfo {nullptr};
         const FEXCore::X86Tables::DecodedInst* DecodedInfo {nullptr};
 
         TableInfo = Block.DecodedInstructions[i].TableInfo;
         DecodedInfo = &Block.DecodedInstructions[i];
+
+        // Instructions inlined from a leaf callee are not contiguous with the block, so take the
+        // address from the decoder rather than summing instruction sizes.
+        const uint64_t InstAddress = DecodedInfo->PC;
+        // Where execution continues when this instruction falls through.
+        const uint64_t InstNextAddress = (DecodedInfo->Flags & X86Tables::DecodeFlags::FLAG_INLINED_RET) ?
+                                           DecodedInfo->InlineReturnRIP :
+                                           InstAddress + DecodedInfo->InstSize;
 
 #ifdef ZYDIS_DISASSEMBLER
         if (FEXCore::Config::Get_X86DISASSEMBLE()) {
@@ -642,7 +649,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
         }
 
         if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection) {
-          auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
+          auto ExistingCodePtr = reinterpret_cast<uint8_t*>(InstAddress);
           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
 
           auto Value = FEXCore::Utils::crc32(ExistingCodePtr, DecodedInfo->InstSize);
@@ -703,7 +710,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
             // Walk InstForceTSOIt forward past the handled instruction
             InstForceTSOIt =
-              std::find_if(InstForceTSOIt, ForceTSOInstructions.end(), [&](auto Val) { return Val >= Block.Entry + BlockInstructionsLength; });
+              std::find_if(InstForceTSOIt, ForceTSOInstructions.end(), [&](auto Val) { return Val >= InstNextAddress; });
           }
         } else {
           // Invalid instruction
@@ -740,13 +747,12 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
         if (NeedsBlockEnd) {
           // We had some instructions. Early exit
-          Thread->OpDispatcher->ExitFunction(
-            Thread->OpDispatcher->_InlineEntrypointOffset(GPRSize, Block.Entry + BlockInstructionsLength - GuestRIP));
+          Thread->OpDispatcher->ExitFunction(Thread->OpDispatcher->_InlineEntrypointOffset(GPRSize, InstNextAddress - GuestRIP));
           break;
         }
 
 
-        if (Thread->OpDispatcher->FinishOp(DecodedInfo->PC + DecodedInfo->InstSize, i + 1 == InstsInBlock)) {
+        if (Thread->OpDispatcher->FinishOp(InstNextAddress, i + 1 == InstsInBlock)) {
           break;
         }
       }

@@ -190,8 +190,9 @@
         "JITDispatchOverride": "NoOp"
       },
 
-      "GuestOpcode u32:$GuestEntryOffset": {
-        "Desc": ["Marks the beginning of a guest opcode"],
+      "GuestOpcode u64:$GuestEntryOffset": {
+        "Desc": ["Marks the beginning of a guest opcode",
+                 "Offset from the multiblock entry RIP; may wrap negative for inlined callees below the entry"],
         "HasSideEffects": true
       },
 

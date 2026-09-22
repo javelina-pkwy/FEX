@@ -1202,6 +1202,84 @@ void Decoder::BranchTargetInMultiblockRange() {
   }
 }
 
+bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStream, bool WantsDataMasks, uint64_t GuestSizePause) {
+  // Inline a direct CALL to a short straight-line callee that ends in RET.
+  //
+  // The generated code is identical to real execution: the CALL still pushes its return address, the
+  // callee body runs with its real RIPs (RIP-relative operands, fault RIP reconstruction), and the RET
+  // pops the return address. The only difference is that the RET does not go through the return
+  // dispatcher: it verifies the popped address is the one the CALL pushed and falls through to the
+  // caller's next instruction, exiting through the normal path otherwise. This removes the RSB
+  // push/pop, lookup and indirect branch for tiny helpers (accessors, atomic wrappers, ...).
+  if (!CTX->Config.InlineLeafCalls || !CTX->Config.Multiblock) {
+    return false;
+  }
+  if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->OP != 0xE8) {
+    return false;
+  }
+  if (!BlockInfo.Is64BitMode || WantsDataMasks || GuestSizePause || Paused || ExecutableRangeWritable) {
+    return false;
+  }
+  if (DecodeInst->Flags & (FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE | FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE |
+                           FEXCore::X86Tables::DecodeFlags::FLAG_REP_PREFIX | FEXCore::X86Tables::DecodeFlags::FLAG_REPNE_PREFIX)) {
+    return false;
+  }
+  if (CTX->AreMonoHacksActive()) {
+    return false;
+  }
+
+  const uint64_t NextRIP = DecodeInst->PC + DecodeInst->InstSize;
+  const uint64_t TargetRIP = NextRIP + DecodeInst->Src[0].Literal();
+  if (TargetRIP == NextRIP) {
+    // GOT-style `call next` is optimized elsewhere.
+    return false;
+  }
+  if (TargetRIP >= Block.Entry && TargetRIP < NextRIP) {
+    // Calling into this block's already-decoded range would confuse block splitting.
+    return false;
+  }
+  if (NextRIP >= NextBlockStartAddress) {
+    // The return address already starts another block of this multiblock; let the CALL end the block.
+    return false;
+  }
+  // Leave headroom so the callee and the continuation never trip the size limits mid-inline.
+  constexpr uint64_t Headroom = MaxInlineInstructions + 2;
+  if (DecodedSize + Headroom >= MaxInst || TotalInstructions + Headroom >= MaxInst || DecodedSize + Headroom >= DefaultDecodedBufferSize) {
+    return false;
+  }
+  // The callee must be in the same executable mapping as the caller.
+  if (!CheckRangeExecutable(TargetRIP, MAX_INST_SIZE) || ExecutableRangeWritable || TargetRIP < ExecutableRangeBase ||
+      TargetRIP >= ExecutableRangeEnd || DecodeInst->PC < ExecutableRangeBase || DecodeInst->PC >= ExecutableRangeEnd) {
+    return false;
+  }
+
+  InlineSavedDecodedSize = DecodedSize;
+  InlineSavedTotalInstructions = TotalInstructions;
+  InlineSavedNumInstructions = Block.NumInstructions;
+  InlineReturnRIP = NextRIP;
+  InlineCount = 0;
+  InlineActive = true;
+  DecodeInst->Flags |= FEXCore::X86Tables::DecodeFlags::FLAG_INLINED_CALL;
+
+  PCOffset = TargetRIP - Block.Entry;
+  InstStream = AdjustAddrForSpecialRegion(_InstStream, EntryPoint, TargetRIP);
+  return true;
+}
+
+void Decoder::AbortInlineCall(DecodedBlocks& Block) {
+  // Roll back everything decoded since the CALL and end the block at the CALL like normal.
+  TotalInstructions = InlineSavedTotalInstructions;
+  DecodedSize = InlineSavedDecodedSize;
+  Block.NumInstructions = InlineSavedNumInstructions;
+  InlineActive = false;
+
+  DecodeInst = &DecodedBuffer[DecodedSize - 1];
+  DecodeInst->Flags &= ~FEXCore::X86Tables::DecodeFlags::FLAG_INLINED_CALL;
+
+  // NOTE: may invalidate iterators into BlockInfo.Blocks; callers break out of the block right after.
+  BranchTargetInMultiblockRange();
+}
+
 bool Decoder::IsBranchMonoTailcall(uint64_t NumInstructions) const {
   // While the mono call backpatching block can easily be detected due it being the only one to contain SMC-faulting
   // atomics, that can't be said for the tailcall jump backpatcher which has changed several times across versions and
@@ -1303,9 +1381,18 @@ void Decoder::AddBranchTarget(uint64_t Target) {
     if (BlockIt->Entry + BlockIt->Size > Target) {
       uint64_t SplitIdx = 0;
       uint64_t SplitAddr = BlockIt->Entry;
-      // Find the instruction boundary of the split
-      for (; SplitIdx < BlockIt->NumInstructions && SplitAddr < Target; SplitIdx++) {
-        SplitAddr += BlockIt->DecodedInstructions[SplitIdx].InstSize;
+      // Find the instruction boundary of the split. Instructions inlined from a leaf callee
+      // (FLAG_INLINED) have unrelated PCs and stay with the CALL that precedes them.
+      for (; SplitIdx < BlockIt->NumInstructions; SplitIdx++) {
+        const auto& Inst = BlockIt->DecodedInstructions[SplitIdx];
+        if (Inst.Flags & FEXCore::X86Tables::DecodeFlags::FLAG_INLINED) {
+          continue;
+        }
+        if (Inst.PC >= Target) {
+          SplitAddr = Inst.PC;
+          break;
+        }
+        SplitAddr = Inst.PC + Inst.InstSize;
       }
       uint64_t SplitOffset = SplitAddr - BlockIt->Entry;
 
@@ -1616,23 +1703,62 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
       }
       uint64_t OpEndAddress = OpAddress + DecodeInst->InstSize;
 
-      DecodedMinAddress = std::min(DecodedMinAddress, OpAddress);
-      DecodedMaxAddress = std::max(DecodedMaxAddress, OpEndAddress);
+      if (!InlineActive) {
+        // Inlined callee instructions live outside the block's own address range. Keep them out of
+        // the decoded range (used for the code-cache entry and hashing) and out of the overlap check;
+        // their pages are still tracked through CodePages for invalidation.
+        DecodedMinAddress = std::min(DecodedMinAddress, OpAddress);
+        DecodedMaxAddress = std::max(DecodedMaxAddress, OpEndAddress);
 
-      if (OpEndAddress > NextBlockStartAddress) {
-        // This instruction would overlap with another so skip adding it to the multiblock
-        break;
+        if (OpEndAddress > NextBlockStartAddress) {
+          // This instruction would overlap with another so skip adding it to the multiblock
+          break;
+        }
       }
 
       EraseBlock = false; // Block contains at least one valid instruction, so unset erase
       ++TotalInstructions;
       ++DecodedSize;
       ++BlockIt->NumInstructions;
-      BlockIt->Size += DecodeInst->InstSize;
+      if (!InlineActive) {
+        // Size only covers the block's own contiguous instructions (see AddBranchTarget splitting).
+        BlockIt->Size += DecodeInst->InstSize;
+      }
 
       // if we weren't provided relocations (guest JIT), try to detect what we can
       if (WantsDataMasks && BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS && BlockInfo.Is64BitMode && !Relocations) {
         DetectDataMasks(OpAddress, *BlockIt);
+      }
+
+      if (InlineActive) {
+        // Decoding the body of an inlined leaf callee.
+        DecodeInst->Flags |= FEXCore::X86Tables::DecodeFlags::FLAG_INLINED;
+        ++InlineCount;
+
+        const bool Ok = BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS;
+        const bool IsPlainRet = Ok && DecodeInst->OP == 0xC3 && !(DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE);
+        if (IsPlainRet) {
+          // The callee returns: fall through to the caller's next instruction.
+          DecodeInst->Flags |= FEXCore::X86Tables::DecodeFlags::FLAG_INLINED_RET;
+          DecodeInst->InlineReturnRIP = InlineReturnRIP;
+          InlineActive = false;
+          PCOffset = InlineReturnRIP - BlockIt->Entry;
+          InstStream = AdjustAddrForSpecialRegion(_InstStream, EntryPoint, InlineReturnRIP);
+          continue;
+        }
+
+        const bool EndsFlow = Ok && (DecodeInst->TableInfo->Flags &
+                                     (FEXCore::X86Tables::InstFlags::FLAGS_BLOCK_END | FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP));
+        if (!Ok || EndsFlow || InlineCount > MaxInlineInstructions || DecodedSize >= MaxInst || TotalInstructions >= MaxInst ||
+            DecodedSize >= DefaultDecodedBufferSize) {
+          // Not a short leaf after all: drop the callee instructions and end the block at the CALL as usual.
+          AbortInlineCall(*BlockIt);
+          break;
+        }
+
+        PCOffset += DecodeInst->InstSize;
+        InstStream += DecodeInst->InstSize;
+        continue;
       }
 
       // Can not continue this block at all on invalid instruction
@@ -1675,6 +1801,11 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
         break;
       }
 
+      if (TryBeginInlineCall(*BlockIt, _InstStream, WantsDataMasks, GuestSizePause)) {
+        // PCOffset/InstStream now point at the callee; keep decoding in this block.
+        continue;
+      }
+
       if (!InstCanContinue()) {
         if (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP) {
           // If we have multiblock enabled
@@ -1699,6 +1830,11 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
         BlockResume = BlockIt - BlockInfo.Blocks.begin();
         break;
       }
+    }
+
+    if (InlineActive) {
+      // The block ended (limits, garbage heuristics, ...) in the middle of an inlined callee.
+      AbortInlineCall(*BlockIt);
     }
 
     if (Paused) {
@@ -1747,6 +1883,7 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
   Paused = false;
   BlockResume = -1;
   DecodedSize = 0;
+  InlineActive = false;
   if (MaxInst == 0) {
     MaxInst = CTX->Config.MaxInstPerBlock;
   }

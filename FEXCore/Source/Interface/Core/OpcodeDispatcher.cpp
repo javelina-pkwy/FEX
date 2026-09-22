@@ -103,6 +103,36 @@ void OpDispatchBuilder::NOPOp(OpcodeArgs) {}
 void OpDispatchBuilder::RETOp(OpcodeArgs) {
   const auto GPRSize = GetGPROpSize();
 
+  if (Op->Flags & X86Tables::DecodeFlags::FLAG_INLINED_RET) {
+    // Return from a leaf callee inlined at its CALL site. Pop the return address like a real RET,
+    // then verify it is still the address that CALL pushed: if so, fall through to the caller's
+    // next instruction (which follows in this block); otherwise take the normal return exit.
+    CalculateDeferredFlags();
+
+    Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
+    Ref NewRIP = Pop(GPRSize, SP);
+    StoreGPRRegister(X86State::REG_RSP, SP);
+
+    Ref Expected = _EntrypointOffset(GPRSize, Op->InlineReturnRIP - Entry);
+
+    auto CurrentBlock = GetCurrentBlock();
+    auto Mismatch = CondJump(NewRIP, Expected, InvalidNode, InvalidNode, CondClass::NEQ, GPRSize);
+
+    // Unexpected return address: leave through the return dispatcher.
+    auto ExitBlock = CreateNewCodeBlockAtEnd();
+    SetTrueJumpTarget(Mismatch, ExitBlock);
+    SetCurrentCodeBlock(ExitBlock);
+    StartNewBlock();
+    ExitFunction(NewRIP, BranchHint::Return);
+
+    // Expected return address: continue with the caller.
+    auto ContinueBlock = CreateNewCodeBlockAfter(CurrentBlock);
+    SetFalseJumpTarget(Mismatch, ContinueBlock);
+    SetCurrentCodeBlock(ContinueBlock);
+    StartNewBlock();
+    return;
+  }
+
   Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
   Ref NewRIP = Pop(GPRSize, SP);
 
@@ -473,8 +503,6 @@ void OpDispatchBuilder::LEAVEOp(OpcodeArgs) {
 void OpDispatchBuilder::CALLOp(OpcodeArgs) {
   const auto GPRSize = GetGPROpSize();
 
-  BlockSetRIP = true;
-
   // Call instruction only uses up to 32-bit signed displacement
   const int64_t TargetOffset = Op->Src[0].Literal();
 
@@ -482,6 +510,14 @@ void OpDispatchBuilder::CALLOp(OpcodeArgs) {
 
   // Push the return address.
   Push(GPRSize, ConstantPC);
+
+  if (Op->Flags & X86Tables::DecodeFlags::FLAG_INLINED_CALL) {
+    // The callee was decoded in place right after this instruction (see Frontend::Decoder::TryBeginInlineCall).
+    // Only the push is needed; the inlined RET pops it and falls through.
+    return;
+  }
+
+  BlockSetRIP = true;
 
   if (TargetOffset != 0) {
     // Store the RIP

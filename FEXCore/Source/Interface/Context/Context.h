@@ -352,6 +352,8 @@ public:
     bool NeedsPendingInterruptFaultCheck {false};
 
     FEX_CONFIG_OPT(Multiblock, MULTIBLOCK);
+    FEX_CONFIG_OPT(InlineLeafCalls, INLINELEAFCALLS);
+    FEX_CONFIG_OPT(PauseDelay, PAUSEDELAY);
     FEX_CONFIG_OPT(SingleStepConfig, SINGLESTEP);
     FEX_CONFIG_OPT(GdbServer, GDBSERVER);
     FEX_CONFIG_OPT(Is64BitMode, IS64BIT_MODE);

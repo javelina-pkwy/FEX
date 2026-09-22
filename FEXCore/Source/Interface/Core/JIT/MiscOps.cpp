@@ -344,8 +344,21 @@ DEF_OP(RDRAND) {
   tst(ARMEmitter::Size::i64Bit, TMP2, 0xFF);
 }
 
+// x86 PAUSE delays the spinning core for tens of nanoseconds (roughly 40-140 cycles depending on
+// the microarchitecture) so that a lock holder can make progress. ARM `yield` is a pure hint and
+// is effectively a nop on current cores, so emulated spin-wait loops iterate far faster than on
+// x86 and hammer the contended cache line. Approximate the delay with a few pipeline flushes:
+// `isb` costs ~7-9 ns on Cortex-X925/A725, so four of them land in the PAUSE range and, unlike a
+// timed WFET wait, have no ~35 ns wakeup floor and no dependency on FEAT_WFxT.
 DEF_OP(Yield) {
-  yield();
+  if (CTX->Config.PauseDelay) {
+    constexpr int PauseISBs = 4;
+    for (int i = 0; i < PauseISBs; ++i) {
+      isb();
+    }
+  } else {
+    yield();
+  }
 }
 
 DEF_OP(MonoBackpatcherWrite) {

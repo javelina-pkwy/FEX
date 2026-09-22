@@ -10,6 +10,24 @@
           "Can cause long JIT compilation times and stutter"
         ]
       },
+      "InlineLeafCalls": {
+        "Type": "bool",
+        "Default": "true",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "Inline short straight-line leaf callees (ending in RET) at direct CALL sites inside multiblocks",
+          "Removes the call/return dispatch for tiny helper functions. Requires Multiblock."
+        ]
+      },
+      "PauseDelay": {
+        "Type": "bool",
+        "Default": "true",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "Emulate the delay of x86 PAUSE with a few ISBs (~30 ns) instead of a bare yield",
+          "Slows emulated spin-wait loops down to x86-like iteration rates so lock holders can progress"
+        ]
+      },
       "MaxInst": {
         "Type": "int32",
         "Default": "5000",

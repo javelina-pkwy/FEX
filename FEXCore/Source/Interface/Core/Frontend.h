@@ -110,6 +110,17 @@ private:
   bool IsBranchMonoTailcall(uint64_t NumInstructions) const;
   bool InstCanContinue() const;
 
+  // Leaf call inlining: decode a short straight-line callee in place of ending the block at a CALL.
+  static constexpr uint64_t MaxInlineInstructions = 12;
+  bool TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStream, bool WantsDataMasks, uint64_t GuestSizePause);
+  void AbortInlineCall(DecodedBlocks& Block);
+  bool InlineActive {};
+  uint64_t InlineReturnRIP {};
+  uint64_t InlineCount {};
+  size_t InlineSavedDecodedSize {};
+  uint64_t InlineSavedTotalInstructions {};
+  uint64_t InlineSavedNumInstructions {};
+
   void AddBranchTarget(uint64_t Target);
 
   void DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block);
