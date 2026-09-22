@@ -1217,7 +1217,7 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->OP != 0xE8) {
     return false;
   }
-  if (!BlockInfo.Is64BitMode || WantsDataMasks || GuestSizePause || Paused || ExecutableRangeWritable) {
+  if (!BlockInfo.Is64BitMode || WantsDataMasks || GuestSizePause || Paused) {
     return false;
   }
   if (DecodeInst->Flags & (FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE | FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE |
@@ -1247,9 +1247,11 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   if (DecodedSize + Headroom >= MaxInst || TotalInstructions + Headroom >= MaxInst || DecodedSize + Headroom >= DefaultDecodedBufferSize) {
     return false;
   }
-  // The callee must be in the same executable mapping as the caller.
-  if (!CheckRangeExecutable(TargetRIP, MAX_INST_SIZE) || ExecutableRangeWritable || TargetRIP < ExecutableRangeBase ||
-      TargetRIP >= ExecutableRangeEnd || DecodeInst->PC < ExecutableRangeBase || DecodeInst->PC >= ExecutableRangeEnd) {
+  // The callee must be executable. Writable code is fine: Wine maps PE images as anonymous RWX
+  // memory (often fragmented into small VMAs), and the callee's pages are added to CodePages by
+  // the decode loop, so self-modification of the callee invalidates this multiblock like any
+  // other instruction it contains.
+  if (!CheckRangeExecutable(TargetRIP, MAX_INST_SIZE)) {
     return false;
   }
 
