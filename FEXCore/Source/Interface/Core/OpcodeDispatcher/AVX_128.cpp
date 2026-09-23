@@ -2295,6 +2295,15 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherQPSImpl(OpcodeArgs,
   return Result;
 }
 
+// TODO: all-ones gather masks. Geekbench 6 Horizon Detection / Photo Filter (and generally compiler-emitted
+// unmasked gathers) build the mask with `vpcmpeqd ymmM, ymmM, ymmM` right before `vpgatherdd ..., ymmM`. Today every
+// 128-bit half still pays the full masked sequence on the SVE path (cmplt p0 -> ld1w p0/z -> sel/mov merge with the old
+// destination). Plan: (1) IsVectorAllOnes(LastXMMDef(mask)) - a VCMPEQ/VFCMPEQ whose two source Refs are the same
+// register; (2) an unmasked VLoadVectorGather IR op (no Incoming/Mask) lowered to a single ld1{b,h,w,d} with the
+// all-true governing predicate straight into the destination, ASIMD fallback reusing Emulate128BitGather with a
+// synthesized all-ones mask, plus the QPS variant; (3) select it per half here; the mask-register clear below stays.
+// Drops 2 of 3 instructions per half-gather (~6% of the Horizon Detection resample loop). Test with ctest -R gather
+// plus a differential test covering all-ones, partial, and compare-of-different-registers masks.
 void OpDispatchBuilder::AVX128_VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
 
   const auto Size = OpSizeFromDst(Op);
