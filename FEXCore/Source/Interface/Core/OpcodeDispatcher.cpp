@@ -5067,8 +5067,11 @@ void OpDispatchBuilder::Prefetch(OpcodeArgs, bool ForStore, bool Stream, uint8_t
     return;
   }
 
-  Ref DestMem = LoadSourceGPR(Op, Op->Src[0], Op->Flags, {.LoadData = false});
-  _Prefetch(ForStore, Stream, Level, DestMem, Invalid(), MemOffsetType::SXTX, 1);
+  // Hand the displacement or scaled index to the JIT so prfm's own addressing modes are used instead of a separate add.
+  AddressMode A = DecodeAddress(Op, Op->Src[0], MemoryAccessType::DEFAULT, true /* IsLoad */);
+  const auto B = SelectAddressMode(this, A, GetGPROpSize(), CTX->HostFeatures.SupportsTSOImm9, false /* AtomicTSO */,
+                                   false /* Vector */, OpSize::i64Bit);
+  _Prefetch(ForStore, Stream, Level, B.Base, B.Index, B.IndexType, B.IndexScale);
 }
 
 void OpDispatchBuilder::RDTSCPOp(OpcodeArgs) {

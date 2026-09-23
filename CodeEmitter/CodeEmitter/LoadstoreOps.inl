@@ -2702,7 +2702,8 @@ public:
     constexpr uint32_t Op = 0b1111'1000'10 << 22;
     constexpr uint32_t o2 = 0b00;
 
-    LoadStoreImm(Op, o2, prfop, rn, Imm);
+    // Mask to imm9 like ldXr/stXr: a negative offset must not leak sign bits into the opcode.
+    LoadStoreImm(Op, o2, prfop, rn, Imm & 0b1'1111'1111);
   }
 
   // Loadstore register immediate post-indexed
