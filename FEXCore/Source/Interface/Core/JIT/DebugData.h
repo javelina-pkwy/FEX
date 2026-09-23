@@ -28,6 +28,9 @@ struct DebugDataGuestOpcode {
  */
 struct DebugData : public FEXCore::Allocator::FEXAllocOperators {
   uint64_t HostCodeSize; ///< The size of the code generated in the host JIT
+  // Guest byte range of leaf callees inlined into this block (see Frontend::Decoder), zero if none.
+  uint64_t InlinedGuestMin {};
+  uint64_t InlinedGuestMax {};
   fextl::vector<DebugDataSubblock> Subblocks;
   fextl::vector<DebugDataGuestOpcode> GuestOpcodes;
   fextl::vector<FEXCore::CPU::Relocation>* Relocations;

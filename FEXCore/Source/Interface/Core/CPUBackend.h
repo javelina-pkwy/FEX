@@ -83,6 +83,11 @@ namespace CPU {
       // The length of the guest code for this block.
       size_t GuestSize;
 
+      // Guest byte range of leaf callees inlined into this block, outside [RIP, RIP+GuestSize).
+      // Zero when nothing was inlined. Consulted by SMC handling alongside the main range.
+      uint64_t InlinedGuestMin;
+      uint64_t InlinedGuestMax;
+
       // Number of RIP entries for this JIT Code section.
       uint32_t NumberOfRIPEntries;
 

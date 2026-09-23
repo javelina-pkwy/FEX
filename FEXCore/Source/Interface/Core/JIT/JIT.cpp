@@ -1080,6 +1080,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   JITCodeTail JITBlockTail {
     .RIP = Entry,
     .GuestSize = Size,
+    .InlinedGuestMin = DebugData ? DebugData->InlinedGuestMin : 0,
+    .InlinedGuestMax = DebugData ? DebugData->InlinedGuestMax : 0,
     .SpinLockFutex = 0,
     .SingleInst = SingleInst,
   };

@@ -1214,7 +1214,9 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   if (!CTX->Config.InlineLeafCalls || !CTX->Config.Multiblock) {
     return false;
   }
-  if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->OP != 0xE8) {
+  // Primary-table CALL rel32 only (0x0F 0xE8 is PSUBSB and also decodes with OP == 0xE8).
+  if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->OP != 0xE8 ||
+      !(DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_CALL)) {
     return false;
   }
   if (!BlockInfo.Is64BitMode || WantsDataMasks || GuestSizePause || Paused) {
@@ -1740,7 +1742,8 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
       if (!InlineActive) {
         // Inlined callee instructions live outside the block's own address range. Keep them out of
         // the decoded range (used for the code-cache entry and hashing) and out of the overlap check;
-        // their pages are still tracked through CodePages for invalidation.
+        // their pages are still tracked through CodePages for invalidation, and their byte range is
+        // recorded separately so SMC writes to them are seen as hitting the current block.
         DecodedMinAddress = std::min(DecodedMinAddress, OpAddress);
         DecodedMaxAddress = std::max(DecodedMaxAddress, OpEndAddress);
 
@@ -1748,6 +1751,9 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
           // This instruction would overlap with another so skip adding it to the multiblock
           break;
         }
+      } else {
+        InlinedMinAddress = InlinedMinAddress ? std::min(InlinedMinAddress, OpAddress) : OpAddress;
+        InlinedMaxAddress = std::max(InlinedMaxAddress, OpEndAddress);
       }
 
       EraseBlock = false; // Block contains at least one valid instruction, so unset erase
@@ -1921,6 +1927,7 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
   BlockResume = -1;
   DecodedSize = 0;
   InlineActive = false;
+  InlinedMinAddress = InlinedMaxAddress = 0;
   if (MaxInst == 0) {
     MaxInst = CTX->Config.MaxInstPerBlock;
   }

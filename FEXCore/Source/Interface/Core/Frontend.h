@@ -73,6 +73,11 @@ public:
   uint64_t DecodedMinAddress {};
   uint64_t DecodedMaxAddress {~0ULL};
 
+  // Guest byte range covered by leaf callees inlined into this multiblock (outside
+  // [DecodedMinAddress, DecodedMaxAddress)). Both zero when nothing was inlined.
+  uint64_t InlinedMinAddress {};
+  uint64_t InlinedMaxAddress {};
+
   void SetExternalBranches(fextl::set<uint64_t>* v) {
     ExternalBranches = v;
   }

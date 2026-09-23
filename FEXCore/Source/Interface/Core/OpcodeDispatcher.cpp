@@ -120,8 +120,12 @@ void OpDispatchBuilder::RETOp(OpcodeArgs) {
     // the fall-through path without the RSP update.
     FlushRegisterCache();
 
+    // The JIT lowers a two-operand CondJump only against an inline constant, so compare via a
+    // subtraction and branch on non-zero (cbnz).
+    Ref Diff = _Sub(GPRSize, NewRIP, Expected);
+
     auto CurrentBlock = GetCurrentBlock();
-    auto Mismatch = CondJump(NewRIP, Expected, InvalidNode, InvalidNode, CondClass::NEQ, GPRSize);
+    auto Mismatch = CondJump(Diff, CondClass::NEQ);
 
     // Unexpected return address: leave through the return dispatcher.
     auto ExitBlock = CreateNewCodeBlockAtEnd();

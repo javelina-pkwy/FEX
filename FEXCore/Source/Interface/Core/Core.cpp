@@ -134,7 +134,14 @@ static GetFrameBlockInfoResult GetFrameBlockInfo(FEXCore::Core::CpuStateFrame* F
 
 bool ContextImpl::IsAddressInCurrentBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, uint64_t Size) {
   auto [_, InlineTail] = GetFrameBlockInfo(Thread->CurrentFrame);
-  return InlineTail && (Address + Size > InlineTail->RIP && Address < InlineTail->RIP + InlineTail->GuestSize);
+  if (!InlineTail) {
+    return false;
+  }
+  if (Address + Size > InlineTail->RIP && Address < InlineTail->RIP + InlineTail->GuestSize) {
+    return true;
+  }
+  // Leaf callees inlined into this block live outside its main range.
+  return InlineTail->InlinedGuestMax && Address + Size > InlineTail->InlinedGuestMin && Address < InlineTail->InlinedGuestMax;
 }
 
 bool ContextImpl::IsCurrentBlockSingleInst(FEXCore::Core::InternalThreadState* Thread) {
@@ -837,6 +844,8 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   }
 
   auto DebugData = fextl::make_unique<FEXCore::Core::DebugData>();
+  DebugData->InlinedGuestMin = Thread->FrontendDecoder->InlinedMinAddress;
+  DebugData->InlinedGuestMax = Thread->FrontendDecoder->InlinedMaxAddress;
 
   // If the trap flag is set we generate single instruction blocks that each check to generate a single step exception.
   bool TFSet = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC];
