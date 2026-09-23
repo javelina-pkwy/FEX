@@ -61,6 +61,10 @@ enum NamedVectorConstant : uint8_t {
   NAMED_VECTOR_SHA1RNDS_K2,
   NAMED_VECTOR_SHA1RNDS_K3,
 
+  // Per-lane bit values {1 << lane}: turn all-ones/zero compare lanes straight into a movmsk bitmask.
+  NAMED_VECTOR_MOVMASKW,
+  NAMED_VECTOR_MOVMASKD,
+
   NAMED_VECTOR_CONST_POOL_MAX,
   // Beginning of named constants that don't have a constant pool backing.
   NAMED_VECTOR_ZERO = NAMED_VECTOR_CONST_POOL_MAX,

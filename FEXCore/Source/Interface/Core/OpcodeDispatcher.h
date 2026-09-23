@@ -978,6 +978,9 @@ public:
   void AVX128_PExtr(OpcodeArgs, IR::OpSize ElementSize);
   void AVX128_ExtendVectorElements(OpcodeArgs, IR::OpSize ElementSize, IR::OpSize DstElementSize, bool Signed);
   void AVX128_MOVMSK(OpcodeArgs, IR::OpSize ElementSize);
+  // True when Def (the op that last defined a register, or nullptr) is a vector compare - possibly inverted -
+  // with lanes at least ElementSize wide, so every ElementSize lane of the value is all-ones or all-zeros.
+  bool IsVectorCompareResult(const IR::OrderedNode* Def, IR::OpSize ElementSize, uint32_t Depth = 0);
   void AVX128_MOVMSKB(OpcodeArgs);
   void AVX128_PINSRImpl(OpcodeArgs, IR::OpSize ElementSize, const X86Tables::DecodedOperand& Src1Op,
                         const X86Tables::DecodedOperand& Src2Op, const X86Tables::DecodedOperand& Imm);
@@ -1179,6 +1182,10 @@ public:
     // At block boundaries, fix up the carry flag.
     if (!SRAOnly) {
       RectifyCarryInvert(CFInvertedABI);
+      // Anything but the per-instruction SRA flush may precede state changes the cache does not see.
+      for (auto& Def : RegLastDef) {
+        Def = nullptr;
+      }
     }
 
     if (!MMXOnly) {
@@ -1961,10 +1968,21 @@ private:
     Ref Value[64];
   } RegCache {};
 
+  // Last SSA value stored to each register-cache slot in the current block. Unlike RegCache this survives the
+  // per-instruction SRA-only flush, so a later instruction can inspect the op that produced a register's current
+  // value (e.g. movmsk of a compare result). Cleared at full flushes (block boundaries, side-effecting ops) and
+  // whenever a slot is invalidated.
+  Ref RegLastDef[64] {};
+
+  Ref LastXMMDef(uint32_t XMM, bool High) const {
+    return RegLastDef[(High ? AVXHigh0Index : FPR0Index) + XMM];
+  }
+
   void InvalidateReg(uint8_t Index) {
     uint64_t Bit = (1ull << (uint64_t)Index);
     RegCache.Cached &= ~Bit;
     RegCache.Written &= ~Bit;
+    RegLastDef[Index] = nullptr;
   }
 
   Ref LoadRegCache(uint64_t Offset, uint8_t Index, RegClass Class, IR::OpSize Size) {
@@ -2080,6 +2098,7 @@ private:
     RegCache.Value[Index] = Value;
     RegCache.Cached |= Bit;
     RegCache.Written |= Bit;
+    RegLastDef[Index] = Value;
   }
 
   void InvalidateHighAVXRegisters() {

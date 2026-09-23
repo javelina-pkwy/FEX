@@ -4424,8 +4424,11 @@ void OpDispatchBuilder::VectorVariableBlend(OpcodeArgs, IR::OpSize ElementSize) 
   // Dest[ElementIdx] = Xmm0[ElementIndex][HighBit] ? Src : Dest;
   //
   // To emulate this on AArch64
-  // Arithmetic shift right by the element size, then use BSL to select the registers
-  Mask = _VSShrI(Size, ElementSize, Mask, IR::OpSizeAsBits(ElementSize) - 1);
+  // Arithmetic shift right by the element size, then use BSL to select the registers.
+  // A compare result already has all-ones/zero lanes and can select directly.
+  if (!IsVectorCompareResult(LastXMMDef(0, false), ElementSize)) {
+    Mask = _VSShrI(Size, ElementSize, Mask, IR::OpSizeAsBits(ElementSize) - 1);
+  }
 
   auto Result = _VBSL(Size, Mask, Src, Dest);
 

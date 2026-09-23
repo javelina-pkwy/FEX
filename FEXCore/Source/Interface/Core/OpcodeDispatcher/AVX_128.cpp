@@ -827,11 +827,66 @@ void OpDispatchBuilder::AVX128_ExtendVectorElements(OpcodeArgs, IR::OpSize Eleme
   AVX128_StoreResult_WithOpSize(Op, Op->Dest, Result);
 }
 
+bool OpDispatchBuilder::IsVectorCompareResult(const IR::OrderedNode* Def, IR::OpSize ElementSize, uint32_t Depth) {
+  if (!Def || Depth > 6) {
+    return false;
+  }
+  const auto* Header = Def->Op(DualListData.DataBegin());
+  const auto Arg = [&](size_t i) {
+    return Header->Args[i].GetNode(DualListData.ListBegin());
+  };
+  // Ops that move or combine whole lanes keep them all-ones/zero as long as they work on lanes at least as wide
+  // as the lanes we care about.
+  const bool LanesWideEnough = IR::OpSizeToSize(Header->ElementSize) >= IR::OpSizeToSize(ElementSize);
+
+  switch (Header->Op) {
+  case OP_VFCMPEQ:
+  case OP_VFCMPNEQ:
+  case OP_VFCMPLT:
+  case OP_VFCMPGT:
+  case OP_VFCMPLE:
+  case OP_VFCMPORD:
+  case OP_VFCMPUNO:
+  case OP_VCMPEQ:
+  case OP_VCMPEQZ:
+  case OP_VCMPGT:
+  case OP_VCMPGTZ:
+  case OP_VCMPLTZ: return LanesWideEnough;
+  // Bitwise ops on all-ones/zero lanes stay all-ones/zero.
+  case OP_VNOT:
+  case OP_VMOV: return IsVectorCompareResult(Arg(0), ElementSize, Depth + 1);
+  case OP_VAND:
+  case OP_VANDN:
+  case OP_VOR:
+  case OP_VXOR: return IsVectorCompareResult(Arg(0), ElementSize, Depth + 1) && IsVectorCompareResult(Arg(1), ElementSize, Depth + 1);
+  // Lane permutes (pshufd broadcasts, unpacks, ...).
+  case OP_VDUPELEMENT:
+  case OP_VREV64: return LanesWideEnough && IsVectorCompareResult(Arg(0), ElementSize, Depth + 1);
+  case OP_VZIP:
+  case OP_VZIP2:
+  case OP_VUNZIP:
+  case OP_VUNZIP2:
+  case OP_VTRN:
+  case OP_VTRN2:
+    return LanesWideEnough && IsVectorCompareResult(Arg(0), ElementSize, Depth + 1) && IsVectorCompareResult(Arg(1), ElementSize, Depth + 1);
+  default: return false;
+  }
+}
+
 void OpDispatchBuilder::AVX128_MOVMSK(OpcodeArgs, IR::OpSize ElementSize) {
   const auto SrcSize = OpSizeFromSrc(Op);
   const auto Is128Bit = SrcSize == OpSize::i128Bit;
 
   auto Src = AVX128_LoadSource_WithOpSize(Op, Op->Src[0], Op->Flags, !Is128Bit);
+
+  // Ops that produced the source register's halves earlier in this block, if any.
+  Ref DefLow {};
+  Ref DefHigh {};
+  if (Op->Src[0].IsGPR()) {
+    const auto XMM = Op->Src[0].Data.GPR.GPR - X86State::REG_XMM_0;
+    DefLow = LastXMMDef(XMM, false);
+    DefHigh = LastXMMDef(XMM, true);
+  }
 
   auto Mask8Byte = [this](Ref Src) {
     // UnZip2 the 64-bit elements as 32-bit to get the sign bits closer.
@@ -847,7 +902,15 @@ void OpDispatchBuilder::AVX128_MOVMSK(OpcodeArgs, IR::OpSize ElementSize) {
     return _Lshr(OpSize::i64Bit, GPR, Constant(62));
   };
 
-  auto Mask4Byte = [this](Ref Src) {
+  auto Mask4Byte = [this](Ref Src, bool IsCompareResult) {
+    if (IsCompareResult) {
+      // Every lane is all-ones or zero: select the lane's bit value {1, 2, 4, 8} and sum. Two ops shorter than the
+      // generic sign-bit extraction, which matters because movmsk usually gates a branch or a tzcnt.
+      auto Bits = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_MOVMASKD);
+      Src = _VAnd(OpSize::i128Bit, Src, Bits);
+      Src = _VAddV(OpSize::i128Bit, OpSize::i32Bit, Src);
+      return _VExtractToGPR(OpSize::i128Bit, OpSize::i32Bit, Src, 0);
+    }
     // Shift all the sign bits to the bottom of their respective elements.
     Src = _VUShrI(OpSize::i128Bit, OpSize::i32Bit, Src, 31);
     // Load the specific 128-bit movmskps shift elements operator.
@@ -865,17 +928,24 @@ void OpDispatchBuilder::AVX128_MOVMSK(OpcodeArgs, IR::OpSize ElementSize) {
     if (ElementSize == OpSize::i64Bit) {
       GPR = Mask8Byte(Src.Low);
     } else {
-      GPR = Mask4Byte(Src.Low);
+      GPR = Mask4Byte(Src.Low, IsVectorCompareResult(DefLow, OpSize::i32Bit));
     }
   } else if (ElementSize == OpSize::i32Bit) {
     Ref Fused = _VUnZip2(OpSize::i128Bit, OpSize::i16Bit, Src.Low, Src.High);
-    Fused = _VUShrI(OpSize::i128Bit, OpSize::i16Bit, Fused, 15);
-    auto ConstantUSHL = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_INCREMENTAL_U16_INDEX);
-    Fused = _VUShl(OpSize::i128Bit, OpSize::i16Bit, Fused, ConstantUSHL, false);
+    if (IsVectorCompareResult(DefLow, OpSize::i32Bit) && IsVectorCompareResult(DefHigh, OpSize::i32Bit)) {
+      // Compare lanes narrowed to 16 bits are 0xFFFF or 0: mask each with its bit value {1 << lane} and sum.
+      auto Bits = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_MOVMASKW);
+      Fused = _VAnd(OpSize::i128Bit, Fused, Bits);
+    } else {
+      Fused = _VUShrI(OpSize::i128Bit, OpSize::i16Bit, Fused, 15);
+      auto ConstantUSHL = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_INCREMENTAL_U16_INDEX);
+      Fused = _VUShl(OpSize::i128Bit, OpSize::i16Bit, Fused, ConstantUSHL, false);
+    }
     Fused = _VAddV(OpSize::i128Bit, OpSize::i16Bit, Fused);
     GPR = _VExtractToGPR(OpSize::i128Bit, OpSize::i16Bit, Fused, 0);
   } else {
-    GPR = Mask4Byte(_VUnZip2(OpSize::i128Bit, OpSize::i32Bit, Src.Low, Src.High));
+    const bool IsCompareResult = IsVectorCompareResult(DefLow, OpSize::i64Bit) && IsVectorCompareResult(DefHigh, OpSize::i64Bit);
+    GPR = Mask4Byte(_VUnZip2(OpSize::i128Bit, OpSize::i32Bit, Src.Low, Src.High), IsCompareResult);
   }
   StoreResultGPR_WithOpSize(Op, Op->Dest, GPR, GetGPROpSize());
 }
@@ -887,8 +957,17 @@ void OpDispatchBuilder::AVX128_MOVMSKB(OpcodeArgs) {
   auto Src = AVX128_LoadSource_WithOpSize(Op, Op->Src[0], Op->Flags, !Is128Bit);
   Ref VMask = LoadAndCacheNamedVectorConstant(OpSize::i128Bit, NAMED_VECTOR_MOVMASKB);
 
-  auto Mask1Byte = [this](Ref Src, Ref VMask) {
-    auto VCMP = _VCMPLTZ(OpSize::i128Bit, OpSize::i8Bit, Src);
+  Ref DefLow {};
+  Ref DefHigh {};
+  if (Op->Src[0].IsGPR()) {
+    const auto XMM = Op->Src[0].Data.GPR.GPR - X86State::REG_XMM_0;
+    DefLow = LastXMMDef(XMM, false);
+    DefHigh = LastXMMDef(XMM, true);
+  }
+
+  auto Mask1Byte = [this](Ref Src, Ref VMask, bool IsCompareResult) {
+    // A compare result already has all-ones/zero lanes; otherwise materialize the sign bits.
+    auto VCMP = IsCompareResult ? Src : _VCMPLTZ(OpSize::i128Bit, OpSize::i8Bit, Src);
     auto VAnd = _VAnd(OpSize::i128Bit, VCMP, VMask);
 
     auto VAdd1 = _VAddP(OpSize::i128Bit, OpSize::i8Bit, VAnd, VAnd);
@@ -899,10 +978,10 @@ void OpDispatchBuilder::AVX128_MOVMSKB(OpcodeArgs) {
     return _VExtractToGPR(OpSize::i128Bit, OpSize::i16Bit, VAdd3, 0);
   };
 
-  Ref Result = Mask1Byte(Src.Low, VMask);
+  Ref Result = Mask1Byte(Src.Low, VMask, IsVectorCompareResult(DefLow, OpSize::i8Bit));
 
   if (!Is128Bit) {
-    auto ResultHigh = Mask1Byte(Src.High, VMask);
+    auto ResultHigh = Mask1Byte(Src.High, VMask, IsVectorCompareResult(DefHigh, OpSize::i8Bit));
     Result = _Orlshl(OpSize::i64Bit, Result, ResultHigh, 16);
   }
 
@@ -1676,16 +1755,20 @@ void OpDispatchBuilder::AVX128_VectorVariableBlend(OpcodeArgs, IR::OpSize Elemen
     Mask.High = AVX128_LoadXMMRegister(MaskRegister, true);
   }
 
-  auto Convert = [&](Ref Src1, Ref Src2, Ref Mask) {
-    const auto ElementSizeBits = IR::OpSizeAsBits(ElementSize);
-    Ref Shifted = _VSShrI(OpSize::i128Bit, ElementSize, Mask, ElementSizeBits - 1);
-    return _VBSL(OpSize::i128Bit, Shifted, Src2, Src1);
+  auto Convert = [&](Ref Src1, Ref Src2, Ref Mask, bool MaskIsCompareResult) {
+    // Selection is by each element's sign bit. A compare result already has every lane all-ones or zero, so it can
+    // feed BSL directly; otherwise broadcast the sign bit across the element first.
+    if (!MaskIsCompareResult) {
+      const auto ElementSizeBits = IR::OpSizeAsBits(ElementSize);
+      Mask = _VSShrI(OpSize::i128Bit, ElementSize, Mask, ElementSizeBits - 1);
+    }
+    return _VBSL(OpSize::i128Bit, Mask, Src2, Src1);
   };
 
   RefPair Result {};
-  Result.Low = Convert(Src1.Low, Src2.Low, Mask.Low);
+  Result.Low = Convert(Src1.Low, Src2.Low, Mask.Low, IsVectorCompareResult(LastXMMDef(MaskRegister, false), ElementSize));
   if (!Is128Bit) {
-    Result.High = Convert(Src1.High, Src2.High, Mask.High);
+    Result.High = Convert(Src1.High, Src2.High, Mask.High, IsVectorCompareResult(LastXMMDef(MaskRegister, true), ElementSize));
   } else {
     Result = AVX128_Zext(Result.Low);
   }
