@@ -4,6 +4,7 @@
 #include "Common/JitSymbols.h"
 
 #include <fcntl.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 namespace FEXCore {
@@ -12,6 +13,9 @@ JITSymbols::JITSymbols() {}
 JITSymbols::~JITSymbols() {
   if (fd != -1) {
     close(fd);
+  }
+  if (codefd != -1) {
+    close(codefd);
   }
 }
 
@@ -24,6 +28,24 @@ void JITSymbols::InitFile() {
   const auto PerfMap = fextl::fmt::format("/tmp/perf-{}.map", getpid());
 #endif
   fd = open(PerfMap.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0644);
+  const auto CodeFile = fextl::fmt::format("/tmp/perf-{}.code", getpid());
+  codefd = open(CodeFile.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0644);
+}
+
+void JITSymbols::RegisterCode(const void* HostAddr, uint32_t CodeSize, uint64_t GuestAddr) {
+  if (codefd == -1) {
+    return;
+  }
+  const uint64_t Header[3] = {reinterpret_cast<uint64_t>(HostAddr), CodeSize, GuestAddr};
+  const iovec IOV[2] = {
+    {const_cast<void*>(static_cast<const void*>(Header)), sizeof(Header)},
+    {const_cast<void*>(HostAddr), CodeSize},
+  };
+  // One writev per block: O_APPEND keeps records from different threads contiguous.
+  auto Result = writev(codefd, IOV, 2);
+  if (Result == -1 && errno == EBADF) {
+    codefd = -1;
+  }
 }
 
 void JITSymbols::RegisterNamedRegion(const void* HostAddr, uint32_t CodeSize, std::string_view Name) {

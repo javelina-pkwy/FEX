@@ -47,9 +47,13 @@ public:
   void Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr, uint64_t GuestAddr, uint32_t CodeSize);
   void Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr, uint32_t CodeSize, std::string_view Name, uintptr_t Offset);
   void RegisterNamedRegion(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr, uint32_t CodeSize, std::string_view Name);
+  // Debug aid: append {HostAddr, CodeSize, GuestAddr} + raw host code bytes to /tmp/perf-<pid>.code so profiles can be
+  // disassembled offline without ptrace access to the process.
+  void RegisterCode(const void* HostAddr, uint32_t CodeSize, uint64_t GuestAddr);
 
 private:
   int fd {-1};
+  int codefd {-1};
   void WriteBuffer(FEXCore::JITSymbolBuffer* Buffer, bool ForceWrite = false);
 };
 } // namespace FEXCore

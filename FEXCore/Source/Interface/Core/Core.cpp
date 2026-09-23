@@ -933,6 +933,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     auto FragmentBasePtr = CompiledCode.BlockBegin;
 
     auto GuestRIPLookup = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
+    Symbols.RegisterCode(FragmentBasePtr, CompiledCode.Size, GuestRIP);
 
     if (DebugData->Subblocks.size()) {
       for (auto& Subblock : DebugData->Subblocks) {
