@@ -82,7 +82,7 @@ uintptr_t NtDllBase;
 uint32_t* NtDllRedirectionLUT;
 uint32_t NtDllRedirectionLUTSize;
 
-// Wine doesn't support issuing direct system calls with SVC, and unlike Windows it doesn't have a 'stable' syscall number for NtContinue
+// Syscall numbers change between Windows and Wine releases so are parsed from ntdll, Wine doesn't support issuing direct system calls with SVC
 void* WineSyscallDispatcher;
 uint64_t WineNtContinueSyscallId;
 uint64_t WineNtAllocateVirtualMemorySyscallId;
@@ -268,11 +268,42 @@ void ParseWineSyscallNumbers(HMODULE NtDll) {
   }
 }
 
+// Size of SyscallTable in Module.S, which Windows syscalls are issued through
+constexpr uint64_t SyscallTableSize = 0x800;
+
+// Returns the syscall number loaded by the x64 syscall stub of the ntdll export Name, or -1 if it isn't a syscall stub
+uint64_t GetX64SyscallId(HMODULE NtDll, const char* Name) {
+  const auto* Export = reinterpret_cast<const uint8_t*>(GetProcAddress(NtDll, Name));
+  // mov r10, rcx
+  if (memcmp(Export, "\x4c\x8b\xd1", 3) != 0) {
+    return -1;
+  }
+  // mov eax, SyscallId
+  if (Export[3] != 0xb8) {
+    return -1;
+  }
+  // test byte ptr [0x7ffe0308], 1
+  if (memcmp(Export + 8, "\xf6\x04\x25\x08\x03\xfe\x7f\x01", 8) != 0) {
+    return -1;
+  }
+  // jne +3
+  if (memcmp(Export + 16, "\x75\x03", 2) != 0) {
+    return -1;
+  }
+  // syscall
+  if (memcmp(Export + 18, "\x0f\x05", 2) != 0) {
+    return -1;
+  }
+  uint32_t SyscallId;
+  memcpy(&SyscallId, Export + 4, sizeof(SyscallId));
+  return SyscallId;
+}
+
 // Syscall thunks may have been patched before FEX has loaded, the default call checker installed by ntdll into FEX will
 // try to invoke the JIT when calling such patched syscalls but this obviously doesn't work before FEX is initalised.
 // This function parses ntdll and sets up a custom call checker to prevent this, as such it must avoid using any syscall
 // thunks itself.
-void InitSyscalls() {
+bool InitSyscalls() {
   // The ntdll exports called by GetModuleHandle/GetProcAddress aren't known to be patched before JIT init by any current
   // software so are safe to call, but if that changes the loader structures in the PEB could be parsed manually.
   const auto NtDll = GetModuleHandleW(L"ntdll.dll");
@@ -282,10 +313,21 @@ void InitSyscalls() {
   if (WineSyscallDispatcherPtr) {
     WineSyscallDispatcher = *WineSyscallDispatcherPtr;
     ParseWineSyscallNumbers(NtDll);
+  } else {
+    // Windows syscall numbers also change between releases, so take them from the x64 syscall stubs in ntdll
+    WineNtContinueSyscallId = GetX64SyscallId(NtDll, "NtContinue");
+    WineNtAllocateVirtualMemorySyscallId = GetX64SyscallId(NtDll, "NtAllocateVirtualMemory");
+    WineNtProtectVirtualMemorySyscallId = GetX64SyscallId(NtDll, "NtProtectVirtualMemory");
+    WineNtRaiseExceptionSyscallId = GetX64SyscallId(NtDll, "NtRaiseException");
+    if (std::max({WineNtContinueSyscallId, WineNtAllocateVirtualMemorySyscallId, WineNtProtectVirtualMemorySyscallId,
+                  WineNtRaiseExceptionSyscallId}) >= SyscallTableSize) {
+      return false;
+    }
   }
 
   FillNtDllLUTs(NtDll);
   PatchCallChecker();
+  return true;
 }
 
 void HandleImageMap(uint64_t Address, bool MainImage = false) {
@@ -580,7 +622,9 @@ extern "C" void SyncThreadContext(CONTEXT* Context) {
 }
 
 NTSTATUS ProcessInit() {
-  InitSyscalls();
+  if (!InitSyscalls()) {
+    return STATUS_NOT_SUPPORTED;
+  }
 
   FEX::Windows::InitCRTProcess();
   FEX::Windows::SetupThreadHandlers();
