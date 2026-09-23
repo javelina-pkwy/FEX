@@ -128,11 +128,18 @@ void OpDispatchBuilder::RETOp(OpcodeArgs) {
     auto Mismatch = CondJump(Diff, CondClass::NEQ);
 
     // Unexpected return address: leave through the return dispatcher.
+    // IR values do not live across blocks (register allocation is per block), so re-read the
+    // popped address from the stack slot just below the updated RSP instead of reusing NewRIP.
     auto ExitBlock = CreateNewCodeBlockAtEnd();
     SetTrueJumpTarget(Mismatch, ExitBlock);
     SetCurrentCodeBlock(ExitBlock);
     StartNewBlock();
-    ExitFunction(NewRIP, BranchHint::Return);
+    {
+      Ref ExitSP = LoadGPRRegister(X86State::REG_RSP);
+      Ref SlotAddr = _Sub(GPRSize, ExitSP, Constant(IR::OpSizeToSize(GPRSize)));
+      Ref ExitRIP = _LoadMemAutoTSO(RegClass::GPR, GPRSize, SlotAddr, GPRSize);
+      ExitFunction(ExitRIP, BranchHint::Return);
+    }
 
     // Expected return address: continue with the caller.
     auto ContinueBlock = CreateNewCodeBlockAfter(CurrentBlock);
