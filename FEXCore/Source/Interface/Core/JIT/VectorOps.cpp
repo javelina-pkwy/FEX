@@ -193,7 +193,7 @@ namespace FEXCore::CPU {
     const auto Vector1 = GetVReg(Op->Vector1);                                                                                \
     const auto Vector2 = GetVReg(Op->Vector2);                                                                                \
                                                                                                                               \
-    VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2);                         \
+    VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2, true);                   \
   }
 
 #define DEF_FMAOP_SCALAR_INSERT(FEXOp, ARMOp, SVEOp)                                                                         \
@@ -307,7 +307,8 @@ void Arm64JITCore::VFScalarFMAOperation(IR::OpSize OpSize, IR::OpSize ElementSiz
 // The result is stored into the destination. The untouched bits of the destination come from Vector1, unless it's a 256 vector
 // and ZeroUpperBits is true, in which case the upper bits are zero.
 void Arm64JITCore::VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarBinaryOpCaller ScalarEmit,
-                                     ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2) {
+                                     ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
+                                     bool EmitIsSingleVnMergingInsn) {
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
   LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
   LOGMAN_THROW_A_FMT(Is256Bit || !ZeroUpperBits, "128-bit operation doesn't support ZeroUpperBits in {}", __func__);
@@ -342,6 +343,11 @@ void Arm64JITCore::VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, 
         ins(SubRegSize.Vector, Dst.Q(), 0, VTMP1.Q(), 0);
       }
     }
+  } else if (EmitIsSingleVnMergingInsn && HostSupportsAFP && !Is256Bit) {
+    // FPCR.NEP merges the untouched elements from the first source (Vn), which is exactly Vector1,
+    // and the sources are read before the destination is written. No copy or insert needed
+    // whether Dst aliases Vector2 or neither source.
+    ScalarEmit(Dst, Vector1, Vector2);
   } else if (Dst != Vector2) { // Dst different from both Vector1 and Vector2
     if (Is256Bit && !ZeroUpperBits) {
       mov(Dst.Z(), Vector1.Z());
@@ -476,7 +482,7 @@ DEF_OP(VFMinScalarInsert) {
   const auto Vector1 = GetVReg(Op->Vector1);
   const auto Vector2 = GetVReg(Op->Vector2);
 
-  VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2);
+  VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2, true);
 }
 
 DEF_OP(VFMaxScalarInsert) {
@@ -502,7 +508,7 @@ DEF_OP(VFMaxScalarInsert) {
   const auto Vector1 = GetVReg(Op->Vector1);
   const auto Vector2 = GetVReg(Op->Vector2);
 
-  VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2);
+  VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2, true);
 }
 
 DEF_OP(VFSqrtScalarInsert) {

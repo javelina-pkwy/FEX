@@ -624,8 +624,11 @@ private:
   // Vector FMA where the destination is a multiplicand (VF*Mul ops): SVE in place, else the accumulator-tied fallback.
   void VFMultiplicandFMAOperation(const IR::IROp_Header* IROp, IR::Ref Node, ScalarFMASVEOpCaller SVEEmit, OpType Fallback);
   using ScalarBinaryOpCaller = std::function<void(ARMEmitter::VRegister Dst, ARMEmitter::VRegister Src1, ARMEmitter::VRegister Src2)>;
+  // EmitIsSingleVnMergingInsn: ScalarEmit is exactly one ASIMD scalar instruction with Src1 as Vn, so under
+  // FEAT_AFP (FPCR.NEP) it already merges the upper elements from Vector1 without any copy.
   void VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarBinaryOpCaller ScalarEmit,
-                         ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2);
+                         ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
+                         bool EmitIsSingleVnMergingInsn = false);
   using ScalarUnaryOpCaller = std::function<void(ARMEmitter::VRegister Dst, std::variant<ARMEmitter::VRegister, ARMEmitter::Register> SrcVar)>;
   void VFScalarUnaryOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarUnaryOpCaller ScalarEmit,
                               ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1,
