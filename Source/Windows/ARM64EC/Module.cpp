@@ -268,6 +268,7 @@ void ParseWineSyscallNumbers(HMODULE NtDll) {
   }
 }
 
+#ifdef ARCHITECTURE_arm64ec
 // Size of SyscallTable in Module.S, which Windows syscalls are issued through
 constexpr uint64_t SyscallTableSize = 0x800;
 
@@ -298,6 +299,7 @@ uint64_t GetX64SyscallId(HMODULE NtDll, const char* Name) {
   memcpy(&SyscallId, Export + 4, sizeof(SyscallId));
   return SyscallId;
 }
+#endif
 
 // Syscall thunks may have been patched before FEX has loaded, the default call checker installed by ntdll into FEX will
 // try to invoke the JIT when calling such patched syscalls but this obviously doesn't work before FEX is initalised.
@@ -314,6 +316,7 @@ bool InitSyscalls() {
     WineSyscallDispatcher = *WineSyscallDispatcherPtr;
     ParseWineSyscallNumbers(NtDll);
   } else {
+#ifdef ARCHITECTURE_arm64ec
     // Windows syscall numbers also change between releases, so take them from the x64 syscall stubs in ntdll
     WineNtContinueSyscallId = GetX64SyscallId(NtDll, "NtContinue");
     WineNtAllocateVirtualMemorySyscallId = GetX64SyscallId(NtDll, "NtAllocateVirtualMemory");
@@ -323,6 +326,7 @@ bool InitSyscalls() {
                   WineNtRaiseExceptionSyscallId}) >= SyscallTableSize) {
       return false;
     }
+#endif
   }
 
   FillNtDllLUTs(NtDll);

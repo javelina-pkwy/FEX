@@ -101,6 +101,7 @@ ExitFunctionSuspendPoint:
   brk #0xCAFE
   // Resume will jump back to `ExitFunctionSuspendResumePoint`
 
+#ifdef ARCHITECTURE_arm64ec
   // Windows encodes the syscall number in the svc immediate, so this has a `svc #N; ret` stub for each syscall number for the
   // wrappers below to jump into. Must match SyscallTableSize in Module.cpp.
 SyscallTable:
@@ -110,6 +111,7 @@ SyscallTable:
     ret
     .set SyscallId, SyscallId + 1
   .endr
+#endif
 
   // Makes a wrapper for calling a system call directly, skipping the usual ntdll thunks
 #define HASH #
