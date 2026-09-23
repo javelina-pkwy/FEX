@@ -746,8 +746,11 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
         }
 
         if (NeedsBlockEnd) {
-          // We had some instructions. Early exit
-          Thread->OpDispatcher->ExitFunction(Thread->OpDispatcher->_InlineEntrypointOffset(GPRSize, InstNextAddress - GuestRIP));
+          // We had some instructions. Early exit.
+          // On a dispatch error or invalid instruction the block ends *before* this instruction so it is
+          // re-entered (and handled on its own) next time; otherwise continue after it.
+          const uint64_t ExitAddress = (HadDispatchError || HadInvalidInst) ? InstAddress : InstNextAddress;
+          Thread->OpDispatcher->ExitFunction(Thread->OpDispatcher->_InlineEntrypointOffset(GPRSize, ExitAddress - GuestRIP));
           break;
         }
 

@@ -115,6 +115,11 @@ void OpDispatchBuilder::RETOp(OpcodeArgs) {
 
     Ref Expected = _EntrypointOffset(GPRSize, Op->InlineReturnRIP - Entry);
 
+    // Commit the cached RSP store (and anything else pending) into *this* block before branching.
+    // StartNewBlock() below flushes into whichever block is current at that point, which would leave
+    // the fall-through path without the RSP update.
+    FlushRegisterCache();
+
     auto CurrentBlock = GetCurrentBlock();
     auto Mismatch = CondJump(NewRIP, Expected, InvalidNode, InvalidNode, CondClass::NEQ, GPRSize);
 

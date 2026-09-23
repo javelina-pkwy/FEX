@@ -114,12 +114,14 @@ private:
   static constexpr uint64_t MaxInlineInstructions = 12;
   bool TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStream, bool WantsDataMasks, uint64_t GuestSizePause);
   void AbortInlineCall(DecodedBlocks& Block);
+  bool InlinedInstructionTouchesStack() const;
   bool InlineActive {};
   uint64_t InlineReturnRIP {};
   uint64_t InlineCount {};
   size_t InlineSavedDecodedSize {};
   uint64_t InlineSavedTotalInstructions {};
   uint64_t InlineSavedNumInstructions {};
+  DecodedBlockStatus InlineSavedBlockStatus {};
 
   void AddBranchTarget(uint64_t Target);
 

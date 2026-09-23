@@ -1258,6 +1258,7 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   InlineSavedDecodedSize = DecodedSize;
   InlineSavedTotalInstructions = TotalInstructions;
   InlineSavedNumInstructions = Block.NumInstructions;
+  InlineSavedBlockStatus = Block.BlockStatus;
   InlineReturnRIP = NextRIP;
   InlineCount = 0;
   InlineActive = true;
@@ -1268,11 +1269,42 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   return true;
 }
 
+bool Decoder::InlinedInstructionTouchesStack() const {
+  using namespace FEXCore::X86Tables;
+  const auto UsesRSP = [](const DecodedOperand& Operand) {
+    switch (Operand.Type) {
+    case DecodedOperand::OpType::GPR:
+    case DecodedOperand::OpType::GPRDirect: return Operand.Data.GPR.GPR == FEXCore::X86State::REG_RSP;
+    case DecodedOperand::OpType::GPRIndirect:
+    case DecodedOperand::OpType::GPRIndirectRelocation: return Operand.Data.GPRIndirect.GPR == FEXCore::X86State::REG_RSP;
+    case DecodedOperand::OpType::SIB:
+    case DecodedOperand::OpType::SIBRelocation:
+      return Operand.Data.SIB.Base == FEXCore::X86State::REG_RSP || Operand.Data.SIB.Index == FEXCore::X86State::REG_RSP;
+    default: return false;
+    }
+  };
+  if (UsesRSP(DecodeInst->Dest) || UsesRSP(DecodeInst->Src[0]) || UsesRSP(DecodeInst->Src[1]) || UsesRSP(DecodeInst->Src[2])) {
+    return true;
+  }
+  // Implicit stack users: PUSH/POP (0x50-0x5F, 0x68, 0x6A, 0x8F, 0x9C/0x9D, 0x0F A0/A1/A8/A9), ENTER/LEAVE (0xC8/0xC9),
+  // and the 0xFF /6 push variant. Rare in tiny leaves; refuse rather than reason about them.
+  const uint16_t OP = DecodeInst->OP;
+  if ((OP >= 0x50 && OP <= 0x5F) || OP == 0x68 || OP == 0x6A || OP == 0x8F || OP == 0x9C || OP == 0x9D || OP == 0xC8 || OP == 0xC9 ||
+      OP == 0x0FA0 || OP == 0x0FA1 || OP == 0x0FA8 || OP == 0x0FA9) {
+    return true;
+  }
+  if (OP == 0xFF && (DecodeInst->ModRM >> 3 & 0b111) == 6) {
+    return true;
+  }
+  return false;
+}
+
 void Decoder::AbortInlineCall(DecodedBlocks& Block) {
   // Roll back everything decoded since the CALL and end the block at the CALL like normal.
   TotalInstructions = InlineSavedTotalInstructions;
   DecodedSize = InlineSavedDecodedSize;
   Block.NumInstructions = InlineSavedNumInstructions;
+  Block.BlockStatus = InlineSavedBlockStatus;
   InlineActive = false;
 
   DecodeInst = &DecodedBuffer[DecodedSize - 1];
@@ -1751,7 +1783,10 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
 
         const bool EndsFlow = Ok && (DecodeInst->TableInfo->Flags &
                                      (FEXCore::X86Tables::InstFlags::FLAGS_BLOCK_END | FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP));
-        if (!Ok || EndsFlow || InlineCount > MaxInlineInstructions || DecodedSize >= MaxInst || TotalInstructions >= MaxInst ||
+        // Conservative: only inline callees that never touch the stack pointer (no push/pop/enter/leave,
+        // no RSP as an operand or address base) and don't carry LOCK/REP prefixes we'd rather not mix in.
+        const bool TouchesStack = Ok && InlinedInstructionTouchesStack();
+        if (!Ok || EndsFlow || TouchesStack || InlineCount > MaxInlineInstructions || DecodedSize >= MaxInst || TotalInstructions >= MaxInst ||
             DecodedSize >= DefaultDecodedBufferSize) {
           // Not a short leaf after all: drop the callee instructions and end the block at the CALL as usual.
           AbortInlineCall(*BlockIt);
