@@ -1214,8 +1214,9 @@ bool Decoder::TryBeginInlineCall(DecodedBlocks& Block, const uint8_t* _InstStrea
   if (!CTX->Config.InlineLeafCalls || !CTX->Config.Multiblock) {
     return false;
   }
-  // Primary-table CALL rel32 only (0x0F 0xE8 is PSUBSB and also decodes with OP == 0xE8).
-  if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->OP != 0xE8 ||
+  // Primary-table CALL rel32 only, matched by table entry: DecodedInst::OP is a synthetic index for
+  // group and secondary-table instructions (0x0F 0xE8 PSUBSB also reports OP == 0xE8).
+  if (Block.BlockStatus != DecodedBlockStatus::SUCCESS || DecodeInst->TableInfo != &FEXCore::X86Tables::BaseOps[0xE8] ||
       !(DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_CALL)) {
     return false;
   }
@@ -1290,15 +1291,25 @@ bool Decoder::InlinedInstructionTouchesStack() const {
   }
   // Implicit stack users: PUSH/POP (0x50-0x5F, 0x68, 0x6A, 0x8F, 0x9C/0x9D, 0x0F A0/A1/A8/A9), ENTER/LEAVE (0xC8/0xC9),
   // and the 0xFF /6 push variant. Rare in tiny leaves; refuse rather than reason about them.
-  const uint16_t OP = DecodeInst->OP;
-  if ((OP >= 0x50 && OP <= 0x5F) || OP == 0x68 || OP == 0x6A || OP == 0x8F || OP == 0x9C || OP == 0x9D || OP == 0xC8 || OP == 0xC9 ||
-      OP == 0x0FA0 || OP == 0x0FA1 || OP == 0x0FA8 || OP == 0x0FA9) {
+  // Use the raw primary opcode byte (DecodedInst::OP is a synthetic index for group instructions) and
+  // distinguish primary- from secondary-table entries by table identity.
+  const auto* Info = DecodeInst->TableInfo;
+  const bool Primary = Info >= FEXCore::X86Tables::BaseOps.data() && Info < FEXCore::X86Tables::BaseOps.data() + FEXCore::X86Tables::BaseOps.size();
+  const bool Secondary =
+    Info >= FEXCore::X86Tables::SecondBaseOps.data() && Info < FEXCore::X86Tables::SecondBaseOps.data() + FEXCore::X86Tables::SecondBaseOps.size();
+  const uint8_t OP = DecodeInst->OPRaw;
+  if (Primary && ((OP >= 0x50 && OP <= 0x5F) || OP == 0x68 || OP == 0x6A || OP == 0x8F || OP == 0x9C || OP == 0x9D || OP == 0xC8 || OP == 0xC9)) {
+    return true;
+  }
+  if (Secondary && (OP == 0xA0 || OP == 0xA1 || OP == 0xA8 || OP == 0xA9)) {
     return true;
   }
   if (OP == 0xFF && (DecodeInst->ModRM >> 3 & 0b111) == 6) {
     return true;
   }
-  return false;
+  // Group instructions (INC/DEC/NEG/... via F6/F7/FE/FF etc.) are not in the primary array; anything
+  // else we can't classify is refused as well, keeping the inliner to plain primary/secondary ops.
+  return !Primary && !Secondary && (DecodeInst->OPRaw == 0xFF || DecodeInst->OPRaw == 0x8F);
 }
 
 void Decoder::AbortInlineCall(DecodedBlocks& Block) {
@@ -1776,7 +1787,10 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
         ++InlineCount;
 
         const bool Ok = BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS;
-        const bool IsPlainRet = Ok && DecodeInst->OP == 0xC3 && !(DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE);
+        // Identify RET by its primary-table entry: DecodedInst::OP is a synthetic index for group
+        // instructions (e.g. `neg dl` = F6 /3 also reports OP == 0xC3), so the opcode number alone is ambiguous.
+        const bool IsPlainRet = Ok && DecodeInst->TableInfo == &FEXCore::X86Tables::BaseOps[0xC3] &&
+                                !(DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_OPERAND_SIZE);
         if (IsPlainRet) {
           // The callee returns: fall through to the caller's next instruction.
           DecodeInst->Flags |= FEXCore::X86Tables::DecodeFlags::FLAG_INLINED_RET;
