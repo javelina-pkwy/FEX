@@ -1219,9 +1219,15 @@ DEF_OP(VLoadVectorGatherMasked) {
     const auto CMPPredicate = ARMEmitter::PReg::p0;
     const auto GoverningPredicate = Is256Bit ? PRED_TMP_32B : PRED_TMP_16B;
 
-    // Check if the sign bit is set for the given element size.
-    cmplt(SubRegSize, CMPPredicate, GoverningPredicate.Zeroing(), MaskReg.Z(), 0);
-    auto TempDst = VTMP1;
+    // A mask known to be all-ones (vpcmpeqd m,m,m right before the gather) needs no predicate and no merge:
+    // gather every lane straight into the destination under the governing predicate.
+    const bool AllOnes = Op->MaskAllOnes;
+    const ARMEmitter::PRegister LoadPredicate = AllOnes ? GoverningPredicate : CMPPredicate;
+    if (!AllOnes) {
+      // Check if the sign bit is set for the given element size.
+      cmplt(SubRegSize, CMPPredicate, GoverningPredicate.Zeroing(), MaskReg.Z(), 0);
+    }
+    auto TempDst = AllOnes ? Dst : VTMP1;
 
     // No need to load a temporary register in the case that we weren't provided a base address and there is no scaling.
     ARMEmitter::SVEMemOperand MemDst {ARMEmitter::SVEMemOperand(VectorIndexLow.Z(), 0)};
@@ -1238,26 +1244,28 @@ DEF_OP(VLoadVectorGatherMasked) {
 
     switch (IROp->ElementSize) {
     case IR::OpSize::i8Bit: {
-      ld1b<ARMEmitter::SubRegSize::i8Bit>(TempDst.Z(), CMPPredicate.Zeroing(), MemDst);
+      ld1b<ARMEmitter::SubRegSize::i8Bit>(TempDst.Z(), LoadPredicate.Zeroing(), MemDst);
       break;
     }
     case IR::OpSize::i16Bit: {
-      ld1h<ARMEmitter::SubRegSize::i16Bit>(TempDst.Z(), CMPPredicate.Zeroing(), MemDst);
+      ld1h<ARMEmitter::SubRegSize::i16Bit>(TempDst.Z(), LoadPredicate.Zeroing(), MemDst);
       break;
     }
     case IR::OpSize::i32Bit: {
-      ld1w<ARMEmitter::SubRegSize::i32Bit>(TempDst.Z(), CMPPredicate.Zeroing(), MemDst);
+      ld1w<ARMEmitter::SubRegSize::i32Bit>(TempDst.Z(), LoadPredicate.Zeroing(), MemDst);
       break;
     }
     case IR::OpSize::i64Bit: {
-      ld1d(TempDst.Z(), CMPPredicate.Zeroing(), MemDst);
+      ld1d(TempDst.Z(), LoadPredicate.Zeroing(), MemDst);
       break;
     }
     default: break;
     }
 
-    ///< Merge elements based on predicate.
-    sel(SubRegSize, Dst.Z(), CMPPredicate, TempDst.Z(), IncomingDst.Z());
+    if (!AllOnes) {
+      ///< Merge elements based on predicate.
+      sel(SubRegSize, Dst.Z(), CMPPredicate, TempDst.Z(), IncomingDst.Z());
+    }
   } else {
     LOGMAN_THROW_A_FMT(!Is256Bit, "Can't emulate this gather load in the backend! Programming error!");
     Emulate128BitGather(IROp->Size, IROp->ElementSize, Dst, IncomingDst, BaseAddr, VectorIndexLow, VectorIndexHigh, MaskReg,
@@ -1299,11 +1307,16 @@ DEF_OP(VLoadVectorGatherMaskedQPS) {
 
     const auto GoverningPredicate = PRED_TMP_16B;
 
-    // Check if the sign bit is set for the given element size.
-    // This will set the predicate bits for elements [0, 1, 2, 3]
-    // We then use punpklo to extend the low results to be for 64-bit elements.
-    cmplt(ARMEmitter::SubRegSize::i32Bit, CMPPredicate, GoverningPredicate.Zeroing(), MaskReg.Z(), 0);
-    punpklo(CMPPredicate2, CMPPredicate);
+    // A mask known to be all-ones needs no predicate and no merge (see VLoadVectorGatherMasked).
+    const bool AllOnes = Op->MaskAllOnes;
+    const ARMEmitter::PRegister LoadPredicate = AllOnes ? GoverningPredicate : CMPPredicate2;
+    if (!AllOnes) {
+      // Check if the sign bit is set for the given element size.
+      // This will set the predicate bits for elements [0, 1, 2, 3]
+      // We then use punpklo to extend the low results to be for 64-bit elements.
+      cmplt(ARMEmitter::SubRegSize::i32Bit, CMPPredicate, GoverningPredicate.Zeroing(), MaskReg.Z(), 0);
+      punpklo(CMPPredicate2, CMPPredicate);
+    }
     auto TempDst = VTMP1;
 
     auto GatherExtend = [this](ARMEmitter::VRegister Dst, std::optional<ARMEmitter::Register> BaseAddr, ARMEmitter::VRegister VectorIndex,
@@ -1325,15 +1338,24 @@ DEF_OP(VLoadVectorGatherMaskedQPS) {
       ld1w<ARMEmitter::SubRegSize::i64Bit>(Dst.Z(), CMPPredicate.Zeroing(), MemDst);
     };
 
-    GatherExtend(TempDst, BaseAddr, VectorIndexLow, CMPPredicate2, ModType, OffsetScale);
+    GatherExtend(TempDst, BaseAddr, VectorIndexLow, LoadPredicate, ModType, OffsetScale);
 
     if (VectorIndexHigh.has_value()) {
-      punpkhi(CMPPredicate2, CMPPredicate);
-      GatherExtend(VTMP2, BaseAddr, *VectorIndexHigh, CMPPredicate2, ModType, OffsetScale);
-      // Move elements to the lower half.
-      uzp1(ARMEmitter::SubRegSize::i32Bit, TempDst.Q(), TempDst.Q(), VTMP2.Q());
-      ///< Merge elements based on predicate.
-      sel(ARMEmitter::SubRegSize::i32Bit, Dst.Z(), CMPPredicate, TempDst.Z(), IncomingDst.Z());
+      if (!AllOnes) {
+        punpkhi(CMPPredicate2, CMPPredicate);
+      }
+      GatherExtend(VTMP2, BaseAddr, *VectorIndexHigh, LoadPredicate, ModType, OffsetScale);
+      if (AllOnes) {
+        // Every lane came from memory: narrow straight into the destination.
+        uzp1(ARMEmitter::SubRegSize::i32Bit, Dst.Q(), TempDst.Q(), VTMP2.Q());
+      } else {
+        // Move elements to the lower half.
+        uzp1(ARMEmitter::SubRegSize::i32Bit, TempDst.Q(), TempDst.Q(), VTMP2.Q());
+        ///< Merge elements based on predicate.
+        sel(ARMEmitter::SubRegSize::i32Bit, Dst.Z(), CMPPredicate, TempDst.Z(), IncomingDst.Z());
+      }
+    } else if (AllOnes) {
+      xtn(ARMEmitter::SubRegSize::i32Bit, Dst.Q(), TempDst.Q());
     } else {
       // Move elements to the lower half.
       xtn(ARMEmitter::SubRegSize::i32Bit, TempDst.Q(), TempDst.Q());

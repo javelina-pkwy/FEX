@@ -5711,7 +5711,7 @@ void OpDispatchBuilder::VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
       }
     }
 
-    auto Result128 = AVX128_VPGatherImpl(Op, Size, ElementLoadSize, AddrElementSize, Dest128, Mask128, VSIB128);
+    auto Result128 = AVX128_VPGatherImpl(Op, Size, ElementLoadSize, AddrElementSize, Dest128, Mask128, VSIB128, false, false);
     // The registers are current split, need to merge them.
     Result = _VInsElement(OpSize::i256Bit, OpSize::i128Bit, 1, 0, Result128.Low, Result128.High);
   } else {
@@ -5727,7 +5727,7 @@ void OpDispatchBuilder::VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
     }
 
     Result =
-      _VLoadVectorGatherMasked(Size, ElementLoadSize, Dest, Mask, BaseAddr, VSIB.Low, Invalid(), AddrElementSize, VSIB.Scale, 0, 0, AddrSize);
+      _VLoadVectorGatherMasked(Size, ElementLoadSize, Dest, Mask, BaseAddr, VSIB.Low, Invalid(), AddrElementSize, VSIB.Scale, 0, 0, AddrSize, false);
   }
 
   if (Is128Bit) {

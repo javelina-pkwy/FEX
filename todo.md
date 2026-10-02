@@ -2,6 +2,10 @@
 
 ## Single-instruction SVE gather when the mask is the `vpcmpeqd x,x,x` all-ones idiom
 
+**Status: implemented** (MaskAllOnes flag on VLoadVectorGatherMasked/QPS, IsVectorAllOnes in the AVX-128 dispatcher).
+Remaining follow-up: a dead-definition pass over `RegLastDef` to also drop the `cmeq` that builds the mask and the
+zeroing `mov`, since the mask is dead once the gather consumes it.
+
 Geekbench 6 Horizon Detection (block `geekbench_avx2+0x6611e0`, ~16% of the workload) and Photo Filter, and
 compiler-emitted unmasked gathers in general, build the gather mask with `vpcmpeqd ymmM, ymmM, ymmM` immediately
 before `vpgatherdd ymmD, [base + ymmI*4], ymmM`. FEX's SVE path (`VLoadVectorGatherMasked`) still pays the full

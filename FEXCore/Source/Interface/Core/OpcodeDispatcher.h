@@ -981,6 +981,9 @@ public:
   // True when Def (the op that last defined a register, or nullptr) is a vector compare - possibly inverted -
   // with lanes at least ElementSize wide, so every ElementSize lane of the value is all-ones or all-zeros.
   bool IsVectorCompareResult(const IR::OrderedNode* Def, IR::OpSize ElementSize, uint32_t Depth = 0);
+  // True when Def (a register's last definition, or nullptr) is provably all-ones in every lane: an integer
+  // compare-equal of a register with itself (the `vpcmpeqd m,m,m` idiom used to build gather masks).
+  bool IsVectorAllOnes(const IR::OrderedNode* Def);
   void AVX128_MOVMSKB(OpcodeArgs);
   void AVX128_PINSRImpl(OpcodeArgs, IR::OpSize ElementSize, const X86Tables::DecodedOperand& Src1Op,
                         const X86Tables::DecodedOperand& Src2Op, const X86Tables::DecodedOperand& Imm);
@@ -1088,8 +1091,9 @@ public:
   void AVX128_VFMAScalarImpl(OpcodeArgs, IROps IROp, uint8_t Src1Idx, uint8_t Src2Idx, uint8_t AddendIdx);
   void AVX128_VFMAddSubImpl(OpcodeArgs, bool AddSub, uint8_t Src1Idx, uint8_t Src2Idx, uint8_t AddendIdx);
 
-  RefPair AVX128_VPGatherQPSImpl(OpcodeArgs, Ref Dest, Ref Mask, RefVSIB VSIB);
-  RefPair AVX128_VPGatherImpl(OpcodeArgs, OpSize Size, OpSize ElementLoadSize, OpSize AddrElementSize, RefPair Dest, RefPair Mask, RefVSIB VSIB);
+  RefPair AVX128_VPGatherQPSImpl(OpcodeArgs, Ref Dest, Ref Mask, RefVSIB VSIB, bool MaskAllOnes);
+  RefPair AVX128_VPGatherImpl(OpcodeArgs, OpSize Size, OpSize ElementLoadSize, OpSize AddrElementSize, RefPair Dest, RefPair Mask, RefVSIB VSIB,
+                              bool MaskAllOnesLow, bool MaskAllOnesHigh);
 
   void AVX128_VPGATHER(OpcodeArgs, OpSize AddrElementSize);
 

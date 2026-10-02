@@ -873,6 +873,18 @@ bool OpDispatchBuilder::IsVectorCompareResult(const IR::OrderedNode* Def, IR::Op
   }
 }
 
+bool OpDispatchBuilder::IsVectorAllOnes(const IR::OrderedNode* Def) {
+  if (!Def) {
+    return false;
+  }
+  const auto* Header = Def->Op(DualListData.DataBegin());
+  switch (Header->Op) {
+  case OP_VCMPEQ: return Header->Args[0].ID().Value == Header->Args[1].ID().Value;
+  case OP_VMOV: return IsVectorAllOnes(Header->Args[0].GetNode(DualListData.ListBegin()));
+  default: return false;
+  }
+}
+
 void OpDispatchBuilder::AVX128_MOVMSK(OpcodeArgs, IR::OpSize ElementSize) {
   const auto SrcSize = OpSizeFromSrc(Op);
   const auto Is128Bit = SrcSize == OpSize::i128Bit;
@@ -2152,7 +2164,7 @@ void OpDispatchBuilder::AVX128_VFMAddSubImpl(OpcodeArgs, bool AddSub, uint8_t Sr
 }
 
 OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, OpSize Size, OpSize ElementLoadSize, OpSize AddrElementSize,
-                                                                  RefPair Dest, RefPair Mask, RefVSIB VSIB) {
+                                                                  RefPair Dest, RefPair Mask, RefVSIB VSIB, bool MaskAllOnesLow, bool MaskAllOnesHigh) {
   LOGMAN_THROW_A_FMT(AddrElementSize == OpSize::i32Bit || AddrElementSize == OpSize::i64Bit, "Unknown address element size");
   const auto Is128Bit = Size == OpSize::i128Bit;
 
@@ -2202,7 +2214,7 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
   RefPair Result {};
   ///< Calculate the low-half.
   Result.Low = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, Dest.Low, Mask.Low, BaseAddr, VSIB.Low, VSIB.High,
-                                        AddrElementSize, VSIB.Scale, 0, 0, AddrSize);
+                                        AddrElementSize, VSIB.Scale, 0, 0, AddrSize, MaskAllOnesLow);
 
   if (Is128Bit) {
     Result.High = LoadZeroVector(OpSize::i128Bit);
@@ -2217,6 +2229,7 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
 
     Ref DestReg = Dest.High;
     Ref MaskReg = Mask.High;
+    bool MaskAllOnes = MaskAllOnesHigh;
     uint8_t IndexElementOffset {};
     uint8_t DataElementOffset {};
     if (AddrElementSize == ElementLoadSize) {
@@ -2233,13 +2246,15 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
       AddrAddressing.High = Invalid();
       DestReg = Result.Low; ///< Start mixing with the low register.
       MaskReg = Mask.Low;   ///< Mask starts with the low mask here.
+      MaskAllOnes = MaskAllOnesLow;
       IndexElementOffset = 0;
       DataElementOffset = IR::NumElements(OpSize::i128Bit, ElementLoadSize) / 2;
     }
 
     ///< Calculate the high-half.
     auto ResultHigh = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, DestReg, MaskReg, BaseAddr, AddrAddressing.Low,
-                                               AddrAddressing.High, AddrElementSize, VSIB.Scale, DataElementOffset, IndexElementOffset, AddrSize);
+                                               AddrAddressing.High, AddrElementSize, VSIB.Scale, DataElementOffset, IndexElementOffset, AddrSize,
+                                               MaskAllOnes);
 
     if (AddrElementSize == OpSize::i64Bit && ElementLoadSize == OpSize::i32Bit) {
       // If we only fetched 128-bits worth of data then the upper-result is all zero.
@@ -2252,7 +2267,7 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
   return Result;
 }
 
-OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherQPSImpl(OpcodeArgs, Ref Dest, Ref Mask, RefVSIB VSIB) {
+OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherQPSImpl(OpcodeArgs, Ref Dest, Ref Mask, RefVSIB VSIB, bool MaskAllOnes) {
 
   ///< BaseAddr doesn't need to exist, calculate that here.
   Ref BaseAddr = VSIB.BaseAddr;
@@ -2284,7 +2299,7 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherQPSImpl(OpcodeArgs,
   auto AddrSize = (Op->Flags & X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) != 0 ? (GPRSize >> 1) : GPRSize;
 
   ///< Calculate the low-half.
-  Result.Low = _VLoadVectorGatherMaskedQPS(OpSize::i128Bit, OpSize::i32Bit, Dest, Mask, BaseAddr, VSIB.Low, VSIB.High, VSIB.Scale, AddrSize);
+  Result.Low = _VLoadVectorGatherMaskedQPS(OpSize::i128Bit, OpSize::i32Bit, Dest, Mask, BaseAddr, VSIB.Low, VSIB.High, VSIB.Scale, AddrSize, MaskAllOnes);
   Result.High = LoadZeroVector(OpSize::i128Bit);
   if (VSIB.High == Invalid()) {
     // Special case for only loading two floats.
@@ -2312,6 +2327,17 @@ void OpDispatchBuilder::AVX128_VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
   auto Dest = AVX128_LoadSource_WithOpSize(Op, Op->Dest, Op->Flags, !Is128Bit);
   auto VSIB = AVX128_LoadVSIB(Op, Op->Src[0], Op->Flags, NeedsHighAddrBytes);
   auto Mask = AVX128_LoadSource_WithOpSize(Op, Op->Src[1], Op->Flags, !Is128Bit);
+
+  // `vpcmpeqd m,m,m` right before the gather is the compiler idiom for an unmasked gather. When the mask register's
+  // last definition in this block is that compare, every lane is known set: the JIT can gather straight into the
+  // destination without predicate generation or merging (the mask register is still cleared below).
+  bool MaskAllOnesLow = false;
+  bool MaskAllOnesHigh = false;
+  if (Op->Src[1].IsGPR()) {
+    const auto MaskXMM = Op->Src[1].Data.GPR.GPR - X86State::REG_XMM_0;
+    MaskAllOnesLow = IsVectorAllOnes(LastXMMDef(MaskXMM, false));
+    MaskAllOnesHigh = !Is128Bit && IsVectorAllOnes(LastXMMDef(MaskXMM, true));
+  }
 
   bool NeedsSVEScale = (VSIB.Scale == 2 || VSIB.Scale == 8) || (VSIB.BaseAddr == Invalid() && VSIB.Scale != 1);
 
@@ -2343,15 +2369,15 @@ void OpDispatchBuilder::AVX128_VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
     }
 
     ///< AddressElementSize is now OpSize::i64Bit
-    Result = AVX128_VPGatherQPSImpl(Op, Dest.Low, Mask.Low, VSIBLow);
+    Result = AVX128_VPGatherQPSImpl(Op, Dest.Low, Mask.Low, VSIBLow, MaskAllOnesLow);
     if (NeedsHighAddrBytes) {
-      auto Res = AVX128_VPGatherQPSImpl(Op, Dest.High, Mask.High, VSIBHigh);
+      auto Res = AVX128_VPGatherQPSImpl(Op, Dest.High, Mask.High, VSIBHigh, MaskAllOnesHigh);
       Result.High = Res.Low;
     }
   } else if (AddrElementSize == OpSize::i64Bit && ElementLoadSize == OpSize::i32Bit) {
-    Result = AVX128_VPGatherQPSImpl(Op, Dest.Low, Mask.Low, VSIB);
+    Result = AVX128_VPGatherQPSImpl(Op, Dest.Low, Mask.Low, VSIB, MaskAllOnesLow);
   } else {
-    Result = AVX128_VPGatherImpl(Op, Size, ElementLoadSize, AddrElementSize, Dest, Mask, VSIB);
+    Result = AVX128_VPGatherImpl(Op, Size, ElementLoadSize, AddrElementSize, Dest, Mask, VSIB, MaskAllOnesLow, MaskAllOnesHigh);
   }
   AVX128_StoreResult_WithOpSize(Op, Op->Dest, Result);
 
