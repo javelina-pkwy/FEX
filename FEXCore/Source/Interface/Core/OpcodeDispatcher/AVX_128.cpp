@@ -2100,9 +2100,13 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
   auto AddrSize = (Op->Flags & X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) != 0 ? (GPRSize >> 1) : GPRSize;
 
   RefPair Result {};
-  ///< Calculate the low-half.
-  Result.Low = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, Dest.Low, Mask.Low, BaseAddr, VSIB.Low, VSIB.High,
-                                        AddrElementSize, VSIB.Scale, 0, 0, AddrSize);
+  ///< Calculate the low-half. An Invalid() mask is all-ones (see AVX128_VPGATHER).
+  if (Mask.Low == Invalid()) {
+    Result.Low = _VLoadVectorGather(OpSize::i128Bit, ElementLoadSize, BaseAddr, VSIB.Low, VSIB.High, AddrElementSize, VSIB.Scale, 0, AddrSize);
+  } else {
+    Result.Low = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, Dest.Low, Mask.Low, BaseAddr, VSIB.Low, VSIB.High,
+                                          AddrElementSize, VSIB.Scale, 0, 0, AddrSize);
+  }
 
   if (Is128Bit) {
     Result.High = LoadZeroVector(OpSize::i128Bit);
@@ -2138,8 +2142,15 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherImpl(OpcodeArgs, Op
     }
 
     ///< Calculate the high-half.
-    auto ResultHigh = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, DestReg, MaskReg, BaseAddr, AddrAddressing.Low,
-                                               AddrAddressing.High, AddrElementSize, VSIB.Scale, DataElementOffset, IndexElementOffset, AddrSize);
+    Ref ResultHigh {};
+    if (MaskReg == Invalid()) {
+      LOGMAN_THROW_A_FMT(DataElementOffset == 0, "Unmasked gathers can't merge into the low half");
+      ResultHigh = _VLoadVectorGather(OpSize::i128Bit, ElementLoadSize, BaseAddr, AddrAddressing.Low, AddrAddressing.High, AddrElementSize,
+                                      VSIB.Scale, IndexElementOffset, AddrSize);
+    } else {
+      ResultHigh = _VLoadVectorGatherMasked(OpSize::i128Bit, ElementLoadSize, DestReg, MaskReg, BaseAddr, AddrAddressing.Low,
+                                            AddrAddressing.High, AddrElementSize, VSIB.Scale, DataElementOffset, IndexElementOffset, AddrSize);
+    }
 
     if (AddrElementSize == OpSize::i64Bit && ElementLoadSize == OpSize::i32Bit) {
       // If we only fetched 128-bits worth of data then the upper-result is all zero.
@@ -2183,8 +2194,12 @@ OpDispatchBuilder::RefPair OpDispatchBuilder::AVX128_VPGatherQPSImpl(OpcodeArgs,
   const auto GPRSize = GetGPROpSize();
   auto AddrSize = (Op->Flags & X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) != 0 ? (GPRSize >> 1) : GPRSize;
 
-  ///< Calculate the low-half.
-  Result.Low = _VLoadVectorGatherMaskedQPS(OpSize::i128Bit, OpSize::i32Bit, Dest, Mask, BaseAddr, VSIB.Low, VSIB.High, VSIB.Scale, AddrSize);
+  ///< Calculate the low-half. An Invalid() mask is all-ones (see AVX128_VPGATHER).
+  if (Mask == Invalid()) {
+    Result.Low = _VLoadVectorGatherQPS(OpSize::i128Bit, OpSize::i32Bit, BaseAddr, VSIB.Low, VSIB.High, VSIB.Scale, AddrSize);
+  } else {
+    Result.Low = _VLoadVectorGatherMaskedQPS(OpSize::i128Bit, OpSize::i32Bit, Dest, Mask, BaseAddr, VSIB.Low, VSIB.High, VSIB.Scale, AddrSize);
+  }
   Result.High = LoadZeroVector(OpSize::i128Bit);
   if (VSIB.High == Invalid()) {
     // Special case for only loading two floats.
@@ -2212,6 +2227,21 @@ void OpDispatchBuilder::AVX128_VPGATHER(OpcodeArgs, OpSize AddrElementSize) {
   auto Dest = AVX128_LoadSource_WithOpSize(Op, Op->Dest, Op->Flags, !Is128Bit);
   auto VSIB = AVX128_LoadVSIB(Op, Op->Src[0], Op->Flags, NeedsHighAddrBytes);
   auto Mask = AVX128_LoadSource_WithOpSize(Op, Op->Src[1], Op->Flags, !Is128Bit);
+
+  // `vpcmpeqd m,m,m` right before the gather is the compiler idiom for an unmasked gather. A mask half whose last
+  // definition is all-ones is replaced by Invalid(), selecting the unmasked gather ops for it (no predicate generation,
+  // merge or NZCV clobber). The mask register is still cleared below.
+  if (Op->Src[1].IsGPR()) {
+    const auto MaskXMM = Op->Src[1].Data.GPR.GPR - X86State::REG_XMM_0;
+    const Ref LowDef = RegCache.LastDef[FPR0Index + MaskXMM];
+    const Ref HighDef = RegCache.LastDef[AVXHigh0Index + MaskXMM];
+    if (LowDef && IsValueAllOnes(WrapNode(LowDef))) {
+      Mask.Low = Invalid();
+    }
+    if (!Is128Bit && HighDef && IsValueAllOnes(WrapNode(HighDef))) {
+      Mask.High = Invalid();
+    }
+  }
 
   bool NeedsSVEScale = (VSIB.Scale == 2 || VSIB.Scale == 8) || (VSIB.BaseAddr == Invalid() && VSIB.Scale != 1);
 

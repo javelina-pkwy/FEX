@@ -1178,6 +1178,10 @@ public:
     // At block boundaries, fix up the carry flag.
     if (!SRAOnly) {
       RectifyCarryInvert(CFInvertedABI);
+      // Anything but the per-instruction SRA flush may precede state changes the cache does not see.
+      for (auto& Def : RegCache.LastDef) {
+        Def = nullptr;
+      }
     }
 
     if (!MMXOnly) {
@@ -1963,12 +1967,17 @@ private:
     uint64_t Partial;
 
     Ref Value[64];
+
+    // Last value stored to each slot in the current block. Unlike Value this survives the per-instruction
+    // SRA flush, so an instruction can inspect the op that produced a register's current value.
+    Ref LastDef[64];
   } RegCache {};
 
   void InvalidateReg(uint8_t Index) {
     uint64_t Bit = (1ull << (uint64_t)Index);
     RegCache.Cached &= ~Bit;
     RegCache.Written &= ~Bit;
+    RegCache.LastDef[Index] = nullptr;
   }
 
   Ref LoadRegCache(uint64_t Offset, uint8_t Index, RegClass Class, IR::OpSize Size) {
@@ -2084,6 +2093,7 @@ private:
     RegCache.Value[Index] = Value;
     RegCache.Cached |= Bit;
     RegCache.Written |= Bit;
+    RegCache.LastDef[Index] = Value;
   }
 
   void InvalidateHighAVXRegisters() {

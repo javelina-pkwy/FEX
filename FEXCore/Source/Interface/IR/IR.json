@@ -634,6 +634,23 @@
           "RegisterSize != FEXCore::IR::OpSize::i256Bit && \"What does 256-bit mean in this context?\""
         ]
       },
+      "FPR = VLoadVectorGather OpSize:#RegisterSize, OpSize:#ElementSize, GPR:$AddrBase, FPR:$VectorIndexLow, FPR:$VectorIndexHigh, OpSize:$VectorIndexElementSize, u8:$OffsetScale, u8:$IndexElementOffsetStart, OpSize:$AddrSize": {
+        "Desc": ["VLoadVectorGatherMasked with every mask element set, so nothing is merged from Incoming"],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "EmitValidation": [
+          "$VectorIndexElementSize == OpSize::i32Bit || $VectorIndexElementSize == OpSize::i64Bit"
+        ]
+      },
+      "FPR = VLoadVectorGatherQPS OpSize:#RegisterSize, OpSize:#ElementSize, GPR:$AddrBase, FPR:$VectorIndexLow, FPR:$VectorIndexHigh, u8:$OffsetScale, OpSize:$AddrSize": {
+        "Desc": ["VLoadVectorGatherMaskedQPS with every mask element set; elements without an address are undefined"],
+        "DestSize": "RegisterSize",
+        "ElementSize": "ElementSize",
+        "EmitValidation": [
+          "ElementSize == OpSize::i32Bit",
+          "RegisterSize != FEXCore::IR::OpSize::i256Bit && \"What does 256-bit mean in this context?\""
+        ]
+      },
       "FPR = VLoadVectorElement OpSize:#RegisterSize, OpSize:#ElementSize, FPR:$DstSrc, u8:$Index, GPR:$Addr": {
         "Desc": ["Does a memory load to a single element of a vector.",
                  "Leaves the rest of the vector's data intact.",

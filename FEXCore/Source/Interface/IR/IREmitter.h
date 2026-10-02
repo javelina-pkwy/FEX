@@ -341,6 +341,13 @@ public:
     return false;
   }
 
+  // True when every bit of the value is set: an integer compare-equal of a value with itself (the `pcmpeq x, x` idiom).
+  bool IsValueAllOnes(OrderedNodeWrapper ssa) const {
+    auto RealNode = ssa.GetNode(DualListData.ListBegin());
+    const auto* IROp = RealNode->Op(DualListData.DataBegin());
+    return IROp->Op == OP_VCMPEQ && IROp->Args[0].ID() == IROp->Args[1].ID();
+  }
+
   FEXCore::IR::IROp_Header* GetOpHeader(OrderedNodeWrapper ssa) {
     Ref RealNode = ssa.GetNode(DualListData.ListBegin());
     return RealNode->Op(DualListData.DataBegin());
