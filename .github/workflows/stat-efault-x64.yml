@@ -1,0 +1,39 @@
+name: stat EFAULT x64 reference
+
+on:
+  push:
+    branches:
+      - ci/stat-efault-x64
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Describe host
+      run: |
+        uname -a
+        lscpu | head -20
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build clang lld gcc-multilib g++-multilib
+
+    - name: Checkout Catch2
+      run: git submodule update --init --depth 1 External/Catch2
+
+    - name: Build stat_efault
+      run: |
+        cmake -S unittests/FEXLinuxTests/tests -B build_64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$PWD/Data/CMake/toolchain_x86_64.cmake -DENABLE_CLANG_THUNKS=True -DBITNESS=64
+        ninja -C build_64 stat_efault.64
+        cmake -S unittests/FEXLinuxTests/tests -B build_32 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$PWD/Data/CMake/toolchain_x86_32.cmake -DENABLE_CLANG_THUNKS=True -DBITNESS=32
+        ninja -C build_32 stat_efault.32
+
+    - name: Run stat_efault natively
+      run: |
+        ./build_64/stat_efault.64 --success
+        ./build_32/stat_efault.32 --success
