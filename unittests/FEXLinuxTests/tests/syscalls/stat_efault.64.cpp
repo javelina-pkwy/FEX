@@ -2,7 +2,6 @@
 
 #include <cerrno>
 #include <fcntl.h>
-#include <sys/statfs.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -36,34 +35,12 @@ TEST_CASE("stat family returns EFAULT for null pointers") {
   CheckPath(SYS_stat);
   CheckPath(SYS_lstat);
   CheckFD(SYS_fstat);
-#ifdef __x86_64__
   CHECK_ERROR(::syscall(SYS_newfstatat, AT_FDCWD, nullptr, Buffer, 0), EFAULT);
   CHECK_ERROR(::syscall(SYS_newfstatat, AT_FDCWD, "/", nullptr, 0), EFAULT);
   CHECK_ERROR(::syscall(SYS_newfstatat, AT_FDCWD, "/does/not/exist", nullptr, 0), ENOENT);
-#else
-  CheckPath(SYS_oldstat);
-  CheckPath(SYS_oldlstat);
-  CheckFD(SYS_oldfstat);
-  CheckPath(SYS_stat64);
-  CheckPath(SYS_lstat64);
-  CheckFD(SYS_fstat64);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, nullptr, Buffer, 0), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, "/", nullptr, 0), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, "/does/not/exist", nullptr, 0), ENOENT);
-#endif
 }
 
 TEST_CASE("statfs family returns EFAULT for null pointers") {
   CheckPath(SYS_statfs);
   CheckFD(SYS_fstatfs);
-#ifndef __x86_64__
-  CHECK_ERROR(::syscall(SYS_statfs64, nullptr, sizeof(struct statfs64), Buffer), EFAULT);
-  CHECK_ERROR(::syscall(SYS_statfs64, "/", sizeof(struct statfs64), nullptr), EFAULT);
-  CHECK_ERROR(::syscall(SYS_statfs64, "/does/not/exist", sizeof(struct statfs64), nullptr), ENOENT);
-  int FD = ::open("/dev/null", O_RDONLY);
-  REQUIRE(FD != -1);
-  CHECK_ERROR(::syscall(SYS_fstatfs64, FD, sizeof(struct statfs64), nullptr), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatfs64, -1, sizeof(struct statfs64), nullptr), EBADF);
-  ::close(FD);
-#endif
 }
