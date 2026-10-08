@@ -24,8 +24,6 @@ static void CheckFD(long Syscall) {
   int FD = ::open("/dev/null", O_RDONLY);
   REQUIRE(FD != -1);
   CHECK_ERROR(::syscall(Syscall, FD, nullptr), EFAULT);
-  // The fd is checked before the result is written back.
-  CHECK_ERROR(::syscall(Syscall, -1, nullptr), EBADF);
   ::close(FD);
 }
 

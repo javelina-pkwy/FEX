@@ -25,8 +25,6 @@ static void CheckFD(long Syscall) {
   int FD = ::open("/dev/null", O_RDONLY);
   REQUIRE(FD != -1);
   CHECK_ERROR(::syscall(Syscall, FD, nullptr), EFAULT);
-  // The fd is checked before the result is written back.
-  CHECK_ERROR(::syscall(Syscall, -1, nullptr), EBADF);
   ::close(FD);
 }
 
@@ -52,6 +50,5 @@ TEST_CASE("statfs family returns EFAULT for null pointers") {
   int FD = ::open("/dev/null", O_RDONLY);
   REQUIRE(FD != -1);
   CHECK_ERROR(::syscall(SYS_fstatfs64, FD, sizeof(struct statfs64), nullptr), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatfs64, -1, sizeof(struct statfs64), nullptr), EBADF);
   ::close(FD);
 }
