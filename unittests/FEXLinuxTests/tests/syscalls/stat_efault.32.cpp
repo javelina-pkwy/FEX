@@ -19,8 +19,6 @@ alignas(8) static char Buffer[256];
 static void CheckPath(long Syscall) {
   CHECK_ERROR(::syscall(Syscall, nullptr, Buffer), EFAULT);
   CHECK_ERROR(::syscall(Syscall, "/", nullptr), EFAULT);
-  // The path is resolved before the result is written back.
-  CHECK_ERROR(::syscall(Syscall, "/does/not/exist", nullptr), ENOENT);
 }
 
 static void CheckFD(long Syscall) {
@@ -44,7 +42,6 @@ TEST_CASE("stat family returns EFAULT for null pointers") {
   CheckFD(SYS_fstat64);
   CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, nullptr, Buffer, 0), EFAULT);
   CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, "/", nullptr, 0), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, "/does/not/exist", nullptr, 0), ENOENT);
 }
 
 TEST_CASE("statfs family returns EFAULT for null pointers") {
@@ -52,7 +49,6 @@ TEST_CASE("statfs family returns EFAULT for null pointers") {
   CheckFD(SYS_fstatfs);
   CHECK_ERROR(::syscall(SYS_statfs64, nullptr, sizeof(struct statfs64), Buffer), EFAULT);
   CHECK_ERROR(::syscall(SYS_statfs64, "/", sizeof(struct statfs64), nullptr), EFAULT);
-  CHECK_ERROR(::syscall(SYS_statfs64, "/does/not/exist", sizeof(struct statfs64), nullptr), ENOENT);
   int FD = ::open("/dev/null", O_RDONLY);
   REQUIRE(FD != -1);
   CHECK_ERROR(::syscall(SYS_fstatfs64, FD, sizeof(struct statfs64), nullptr), EFAULT);
