@@ -49,3 +49,10 @@ jobs:
         for B in 64 32; do for C in stat fstat; do for P in ro none; do
           echo "$B $C $P: $(./badbuf$B $C $P)"
         done; done; done
+
+    - name: Non-readable pointer probe
+      run: |
+        gcc -O1 -o badptr64 badptr.c && gcc -m32 -O1 -o badptr32 badptr.c
+        for B in 64 32; do for T in path buf; do for C in stat lstat statfs; do for K in none unmapped; do
+          echo "$B $T $C $K: $(./badptr$B $T $C $K)"
+        done; done; done; done
