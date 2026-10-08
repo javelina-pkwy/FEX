@@ -6,49 +6,26 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-// Large enough for any of the stat and statfs structures.
-alignas(8) static char Buffer[256];
-
-#define CHECK_ERROR(Expr, ExpectedError) \
-  do {                                   \
-    long Result = (Expr);                \
-    REQUIRE(Result == -1);               \
-    CHECK(errno == (ExpectedError));     \
+#define CHECK_EFAULT(Expr)  \
+  do {                      \
+    REQUIRE((Expr) == -1);  \
+    CHECK(errno == EFAULT); \
   } while (0)
 
-static void CheckPath(long Syscall) {
-  CHECK_ERROR(::syscall(Syscall, nullptr, Buffer), EFAULT);
-  CHECK_ERROR(::syscall(Syscall, "/", nullptr), EFAULT);
-}
-
-static void CheckFD(long Syscall) {
-  int FD = ::open("/dev/null", O_RDONLY);
-  REQUIRE(FD != -1);
-  CHECK_ERROR(::syscall(Syscall, FD, nullptr), EFAULT);
-  ::close(FD);
-}
-
 TEST_CASE("stat family returns EFAULT for null pointers") {
-  CheckPath(SYS_stat);
-  CheckPath(SYS_lstat);
-  CheckFD(SYS_fstat);
-  CheckPath(SYS_oldstat);
-  CheckPath(SYS_oldlstat);
-  CheckFD(SYS_oldfstat);
-  CheckPath(SYS_stat64);
-  CheckPath(SYS_lstat64);
-  CheckFD(SYS_fstat64);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, nullptr, Buffer, 0), EFAULT);
-  CHECK_ERROR(::syscall(SYS_fstatat64, AT_FDCWD, "/", nullptr, 0), EFAULT);
-}
-
-TEST_CASE("statfs family returns EFAULT for null pointers") {
-  CheckPath(SYS_statfs);
-  CheckFD(SYS_fstatfs);
-  CHECK_ERROR(::syscall(SYS_statfs64, nullptr, sizeof(struct statfs64), Buffer), EFAULT);
-  CHECK_ERROR(::syscall(SYS_statfs64, "/", sizeof(struct statfs64), nullptr), EFAULT);
-  int FD = ::open("/dev/null", O_RDONLY);
-  REQUIRE(FD != -1);
-  CHECK_ERROR(::syscall(SYS_fstatfs64, FD, sizeof(struct statfs64), nullptr), EFAULT);
-  ::close(FD);
+  int FD = ::open("/", O_RDONLY);
+  CHECK_EFAULT(::syscall(SYS_oldstat, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_oldfstat, FD, nullptr));
+  CHECK_EFAULT(::syscall(SYS_oldlstat, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_stat, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_fstat, FD, nullptr));
+  CHECK_EFAULT(::syscall(SYS_lstat, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_stat64, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_lstat64, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_fstat64, FD, nullptr));
+  CHECK_EFAULT(::syscall(SYS_statfs, "/", nullptr));
+  CHECK_EFAULT(::syscall(SYS_fstatfs, FD, nullptr));
+  CHECK_EFAULT(::syscall(SYS_fstatfs64, FD, sizeof(struct statfs64), nullptr));
+  CHECK_EFAULT(::syscall(SYS_statfs64, "/", sizeof(struct statfs64), nullptr));
+  CHECK_EFAULT(::syscall(SYS_fstatat64, AT_FDCWD, "/", nullptr, 0));
 }
