@@ -42,3 +42,10 @@ jobs:
       run: |
         gcc -O0 -o probe64 stat_probe.c && ./probe64
         gcc -m32 -O0 -o probe32 stat_probe.c && ./probe32
+
+    - name: Non-NULL bad buffer probe
+      run: |
+        gcc -O1 -o badbuf64 badbuf.c && gcc -m32 -O1 -o badbuf32 badbuf.c
+        for B in 64 32; do for C in stat fstat; do for P in ro none; do
+          echo "$B $C $P: $(./badbuf$B $C $P)"
+        done; done; done
