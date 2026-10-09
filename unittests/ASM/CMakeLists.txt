@@ -64,8 +64,10 @@ foreach(ASM_SRC ${ASM_SOURCES})
   endif()
 
   if (NOT MINGW)
+    set(TEST_RUNNER "$<TARGET_FILE:TestHarnessLauncher>")
     set(LAUNCH_PROGRAM "${CMAKE_BINARY_DIR}/Bin/TestHarnessRunner")
   else()
+    set(TEST_RUNNER "python3" "${CMAKE_SOURCE_DIR}/Scripts/testharness_runner.py")
     set(LAUNCH_PROGRAM "wine" "${CMAKE_BINARY_DIR}/Bin/TestHarnessRunner.exe")
   endif()
 
@@ -87,7 +89,7 @@ foreach(ASM_SRC ${ASM_SOURCES})
     endif()
 
     add_test(NAME ${TEST_NAME}
-      COMMAND "python3" "${CMAKE_SOURCE_DIR}/Scripts/testharness_runner.py"
+      COMMAND ${TEST_RUNNER}
       "${CMAKE_SOURCE_DIR}/unittests/ASM/Known_Failures"
       "${CMAKE_SOURCE_DIR}/unittests/ASM/Known_Failures_${TEST_TYPE}"
       "${CMAKE_SOURCE_DIR}/unittests/ASM/Disabled_Tests"

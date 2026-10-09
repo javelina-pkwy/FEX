@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# Currently unused, replaced by unittests/Utilities/GuestTestLauncher.cpp
 import json
 import os
 import sys

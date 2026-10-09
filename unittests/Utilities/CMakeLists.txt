@@ -6,3 +6,8 @@ add_custom_target(remove_old_shm_regions
   USES_TERMINAL
   COMMAND "DeleteOldSHMRegions")
 
+add_executable(TestHarnessLauncher TestHarnessLauncher.cpp)
+
+add_executable(GuestTestLauncher GuestTestLauncher.cpp)
+target_link_libraries(GuestTestLauncher PRIVATE tiny-json::tiny-json)
+
