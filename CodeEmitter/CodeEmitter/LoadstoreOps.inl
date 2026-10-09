@@ -416,6 +416,17 @@ public:
         0;
     ASIMDSTLD<size, true, 1>(Op, Opcode, rt, Index, rn, Reg::r0);
   }
+  // LDAP1/STL1 (SIMD&FP)
+  void stl1(VRegister rt, uint32_t Index, Register rn) {
+    constexpr uint32_t Op = 0b0000'1101'000 << 21 | (0b1 << 16);
+    constexpr uint32_t Opcode = 0b100;
+    ASIMDSTLD<SubRegSize::i64Bit, false, 1>(Op, Opcode, rt, Index, rn, Reg::r0);
+  }
+  void ldap1(VRegister rt, uint32_t Index, Register rn) {
+    constexpr uint32_t Op = 0b0000'1101'000 << 21 | (0b1 << 16);
+    constexpr uint32_t Opcode = 0b100;
+    ASIMDSTLD<SubRegSize::i64Bit, true, 1>(Op, Opcode, rt, Index, rn, Reg::r0);
+  }
   template<SubRegSize size, IsQOrDRegister T>
   void ld1r(T rt, Register rn) {
     constexpr uint32_t Op = 0b0000'1101'000 << 21;
@@ -1959,6 +1970,57 @@ public:
     LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
     constexpr uint32_t Op = 0b0001'1001'000 << 21;
     SubAtomicImm(Op, ARMEmitter::SubRegSize::i64Bit, 0b01, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  // LDAPUR/STLUR (SIMD&FP)
+  void stlur(ARMEmitter::BRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i8Bit, 0b00, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void ldapur(ARMEmitter::BRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i8Bit, 0b01, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void stlur(ARMEmitter::HRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i16Bit, 0b00, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void ldapur(ARMEmitter::HRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i16Bit, 0b01, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void stlur(ARMEmitter::SRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i32Bit, 0b00, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void ldapur(ARMEmitter::SRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i32Bit, 0b01, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void stlur(ARMEmitter::DRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i64Bit, 0b00, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void ldapur(ARMEmitter::DRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i64Bit, 0b01, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void stlur(ARMEmitter::QRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i8Bit, 0b10, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
+  }
+  void ldapur(ARMEmitter::QRegister rt, ARMEmitter::Register rn, int32_t Imm) {
+    LOGMAN_THROW_A_FMT(Imm >= -256 && Imm <= 255, "Unscaled offset too large");
+    constexpr uint32_t Op = 0b0001'1101'000 << 21 | (0b10 << 10);
+    SubAtomicImm(Op, ARMEmitter::SubRegSize::i8Bit, 0b11, rt, rn, static_cast<uint32_t>(Imm) & 0x1'FF);
   }
   // Load register literal
   void ldr(ARMEmitter::WRegister rt, int32_t Imm) {

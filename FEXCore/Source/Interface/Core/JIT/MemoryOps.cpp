@@ -828,6 +828,33 @@ DEF_OP(LoadMemTSO) {
       // Half-barrier once back-patched.
       nop();
     }
+  } else if (CTX->HostFeatures.SupportsRCPC3 && CTX->IsVectorAtomicTSOEnabled() && OpSize != IR::OpSize::i256Bit) {
+    LOGMAN_THROW_A_FMT(Op->OffsetScale == 1, "unexpected offset scale");
+    LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MemOffsetType::SXTX, "unexpected offset type");
+
+    const auto Dst = GetVReg(Node);
+    auto Base = MemReg;
+    uint64_t Offset = 0;
+    if (!Op->Offset.IsInvalid() && !IsInlineConstant(Op->Offset, &Offset)) {
+      // LDAPUR only supports an immediate offset.
+      add(ARMEmitter::Size::i64Bit, TMP1, MemReg, GetReg(Op->Offset));
+      Base = TMP1;
+    }
+
+    if (OpSize == IR::OpSize::i8Bit) {
+      // 8bit load is always aligned to natural alignment
+      ldapur(Dst.B(), Base, Offset);
+    } else {
+      switch (OpSize) {
+      case IR::OpSize::i16Bit: ldapur(Dst.H(), Base, Offset); break;
+      case IR::OpSize::i32Bit: ldapur(Dst.S(), Base, Offset); break;
+      case IR::OpSize::i64Bit: ldapur(Dst.D(), Base, Offset); break;
+      case IR::OpSize::i128Bit: ldapur(Dst.Q(), Base, Offset); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+      }
+      // Half-barrier once back-patched.
+      nop();
+    }
   } else {
     const auto Dst = GetVReg(Node);
     const auto MemSrc = GenerateMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
@@ -1362,6 +1389,21 @@ DEF_OP(VLoadVectorElement) {
                      "Invalid element "
                      "size");
 
+  if (CTX->HostFeatures.SupportsRCPC3 && CTX->IsVectorAtomicTSOEnabled() && !Is256Bit &&
+      (ElementSize == IR::OpSize::i64Bit || ElementSize == IR::OpSize::i128Bit)) {
+    if (Dst != DstSrc && ElementSize != IR::OpSize::i128Bit) {
+      mov(Dst.Q(), DstSrc.Q());
+    }
+    switch (ElementSize) {
+    case IR::OpSize::i64Bit: ldap1(Dst.Q(), Op->Index, MemReg); break;
+    case IR::OpSize::i128Bit: ldapur(Dst.Q(), MemReg, 0); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ElementSize); return;
+    }
+    // Half-barrier once back-patched.
+    nop();
+    return;
+  }
+
   if (Is256Bit) {
     LOGMAN_MSG_A_FMT("Unsupported 256-bit VLoadVectorElement");
   } else {
@@ -1399,6 +1441,18 @@ DEF_OP(VStoreVectorElement) {
                      "Invalid element "
                      "size");
 
+  if (CTX->HostFeatures.SupportsRCPC3 && CTX->IsVectorAtomicTSOEnabled() && !Is256Bit &&
+      (ElementSize == IR::OpSize::i64Bit || ElementSize == IR::OpSize::i128Bit)) {
+    // Half-barrier once back-patched.
+    nop();
+    switch (ElementSize) {
+    case IR::OpSize::i64Bit: stl1(Value.Q(), Op->Index, MemReg); break;
+    case IR::OpSize::i128Bit: stlur(Value.Q(), MemReg, 0); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ElementSize); return;
+    }
+    return;
+  }
+
   // Emit a half-barrier if TSO is enabled.
   if (CTX->IsVectorAtomicTSOEnabled()) {
     dmb(ARMEmitter::BarrierScope::ISH);
@@ -1433,6 +1487,30 @@ DEF_OP(VBroadcastFromMem) {
                        ElementSize == IR::OpSize::i64Bit || ElementSize == IR::OpSize::i128Bit,
                      "Invalid element "
                      "size");
+
+  if (CTX->HostFeatures.SupportsRCPC3 && CTX->IsVectorAtomicTSOEnabled() && !Is256Bit) {
+    // LRCPC3 has no load-acquire replicate, so load the element and broadcast it.
+    switch (ElementSize) {
+    case IR::OpSize::i8Bit: ldapur(Dst.B(), MemReg, 0); break;
+    case IR::OpSize::i16Bit: ldapur(Dst.H(), MemReg, 0); break;
+    case IR::OpSize::i32Bit: ldapur(Dst.S(), MemReg, 0); break;
+    case IR::OpSize::i64Bit: ldapur(Dst.D(), MemReg, 0); break;
+    case IR::OpSize::i128Bit: ldapur(Dst.Q(), MemReg, 0); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled VBroadcastFromMem size: {}", ElementSize); return;
+    }
+    if (ElementSize != IR::OpSize::i8Bit) {
+      // Half-barrier once back-patched.
+      nop();
+    }
+    switch (ElementSize) {
+    case IR::OpSize::i8Bit: dup(ARMEmitter::SubRegSize::i8Bit, Dst.Q(), Dst.Q(), 0); break;
+    case IR::OpSize::i16Bit: dup(ARMEmitter::SubRegSize::i16Bit, Dst.Q(), Dst.Q(), 0); break;
+    case IR::OpSize::i32Bit: dup(ARMEmitter::SubRegSize::i32Bit, Dst.Q(), Dst.Q(), 0); break;
+    case IR::OpSize::i64Bit: dup(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Dst.Q(), 0); break;
+    default: break;
+    }
+    return;
+  }
 
   if (Is256Bit && HostSupportsSVE256) {
     const auto GoverningPredicate = PRED_TMP_32B.Zeroing();
@@ -1821,6 +1899,33 @@ DEF_OP(StoreMemTSO) {
       case IR::OpSize::i16Bit: stlrh(Src, MemReg); break;
       case IR::OpSize::i32Bit: stlr(Src.W(), MemReg); break;
       case IR::OpSize::i64Bit: stlr(Src.X(), MemReg); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
+      }
+    }
+  } else if (CTX->HostFeatures.SupportsRCPC3 && CTX->IsVectorAtomicTSOEnabled() && OpSize != IR::OpSize::i256Bit) {
+    LOGMAN_THROW_A_FMT(Op->OffsetScale == 1, "unexpected offset scale");
+    LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MemOffsetType::SXTX, "unexpected offset type");
+
+    const auto Src = GetVReg(Op->Value);
+    auto Base = MemReg;
+    uint64_t Offset = 0;
+    if (!Op->Offset.IsInvalid() && !IsInlineConstant(Op->Offset, &Offset)) {
+      // STLUR only supports an immediate offset.
+      add(ARMEmitter::Size::i64Bit, TMP1, MemReg, GetReg(Op->Offset));
+      Base = TMP1;
+    }
+
+    if (OpSize == IR::OpSize::i8Bit) {
+      // 8bit store is always aligned to natural alignment
+      stlur(Src.B(), Base, Offset);
+    } else {
+      // Half-barrier once back-patched.
+      nop();
+      switch (OpSize) {
+      case IR::OpSize::i16Bit: stlur(Src.H(), Base, Offset); break;
+      case IR::OpSize::i32Bit: stlur(Src.S(), Base, Offset); break;
+      case IR::OpSize::i64Bit: stlur(Src.D(), Base, Offset); break;
+      case IR::OpSize::i128Bit: stlur(Src.Q(), Base, Offset); break;
       default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
       }
     }

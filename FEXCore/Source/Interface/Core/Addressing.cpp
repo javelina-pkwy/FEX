@@ -88,7 +88,7 @@ AddressMode SelectAddressMode(IREmitter* IREmit, const AddressMode& A, IR::OpSiz
   // TSO Vector:
   // * ARMv8.0:
   //   Just DMB + previous
-  // * FEAT_LRCPC3 (Unsupported by FEXCore currently):
+  // * FEAT_LRCPC3:
   //   LDAPUR/STLUR: [Reg + [-256,255]]
 
   const auto AccessSizeAsImm = OpSizeToSize(AccessSize);

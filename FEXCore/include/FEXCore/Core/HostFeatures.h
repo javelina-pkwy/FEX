@@ -57,6 +57,7 @@ struct HostFeatures {
   uint32_t SupportsAtomics             : 1 {};
   uint32_t SupportsRCPC                : 1 {};
   uint32_t SupportsTSOImm9             : 1 {};
+  uint32_t SupportsRCPC3               : 1 {};
   uint32_t SupportsRAND                : 1 {};
   uint32_t SupportsAVX                 : 1 {};
   uint32_t SupportsSVE128              : 1 {};
@@ -85,7 +86,7 @@ struct HostFeatures {
   uint32_t SupportsFloatExceptions     : 1 {};
   // Flag if this is InstCountCI
   uint32_t IsInstCountCI : 1 {};
-  uint32_t pad           : 26 {};
+  uint32_t pad           : 25 {};
 
   // This affects codegen, but it isn't machine state
   HostTypeEnum HostType {};

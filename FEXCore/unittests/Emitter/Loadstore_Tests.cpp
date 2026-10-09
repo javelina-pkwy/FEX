@@ -834,6 +834,20 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: Loadstore: ASIMD loadstore single")
                                                                                                 "[x30]");
   TEST_SINGLE(st4<SubRegSize::i64Bit>(VReg::v26, VReg::v27, VReg::v28, VReg::v29, 1, Reg::r30), "st4 {v26.d, v27.d, v28.d, v29.d}[1], "
                                                                                                 "[x30]");
+
+  // vixl does not support these.
+  // TEST_SINGLE(ldap1(VReg::v26, 0, Reg::r30), "ldap1 {v26.d}[0], [x30]");
+  TEST_SINGLE(ldap1(VReg::v26, 0, Reg::r30), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x0d4187da);
+  // TEST_SINGLE(ldap1(VReg::v26, 1, Reg::r30), "ldap1 {v26.d}[1], [x30]");
+  TEST_SINGLE(ldap1(VReg::v26, 1, Reg::r30), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x4d4187da);
+  // TEST_SINGLE(stl1(VReg::v26, 0, Reg::r30), "stl1 {v26.d}[0], [x30]");
+  TEST_SINGLE(stl1(VReg::v26, 0, Reg::r30), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x0d0187da);
+  // TEST_SINGLE(stl1(VReg::v26, 1, Reg::r30), "stl1 {v26.d}[1], [x30]");
+  TEST_SINGLE(stl1(VReg::v26, 1, Reg::r30), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x4d0187da);
 }
 TEST_CASE_METHOD(TestDisassembler, "Emitter: Loadstore: Advanced SIMD load/store single structure (post-indexed)") {
   TEST_SINGLE(ld1<SubRegSize::i8Bit>(VReg::v26, 0, Reg::r30, 1), "ld1 {v26.b}[0], [x30], #1");
@@ -1308,6 +1322,38 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: Loadstore: LDAPR/STLR unscaled imme
 
   TEST_SINGLE(stlur(XReg::x30, Reg::r29, -256), "stlur x30, [x29, #-256]");
   TEST_SINGLE(stlur(XReg::x30, Reg::r29, 255), "stlur x30, [x29, #255]");
+
+  // vixl does not support these.
+  // TEST_SINGLE(stlur(BReg::b30, Reg::r29, -256), "stlur b30, [x29, #-256]");
+  TEST_SINGLE(stlur(BReg::b30, Reg::r29, -256), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x1d100bbe);
+  // TEST_SINGLE(ldapur(BReg::b30, Reg::r29, 255), "ldapur b30, [x29, #255]");
+  TEST_SINGLE(ldapur(BReg::b30, Reg::r29, 255), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x1d4ffbbe);
+  // TEST_SINGLE(stlur(HReg::h30, Reg::r29, -256), "stlur h30, [x29, #-256]");
+  TEST_SINGLE(stlur(HReg::h30, Reg::r29, -256), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x5d100bbe);
+  // TEST_SINGLE(ldapur(HReg::h30, Reg::r29, 255), "ldapur h30, [x29, #255]");
+  TEST_SINGLE(ldapur(HReg::h30, Reg::r29, 255), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x5d4ffbbe);
+  // TEST_SINGLE(stlur(SReg::s30, Reg::r29, -256), "stlur s30, [x29, #-256]");
+  TEST_SINGLE(stlur(SReg::s30, Reg::r29, -256), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x9d100bbe);
+  // TEST_SINGLE(ldapur(SReg::s30, Reg::r29, 255), "ldapur s30, [x29, #255]");
+  TEST_SINGLE(ldapur(SReg::s30, Reg::r29, 255), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x9d4ffbbe);
+  // TEST_SINGLE(stlur(DReg::d30, Reg::r29, -256), "stlur d30, [x29, #-256]");
+  TEST_SINGLE(stlur(DReg::d30, Reg::r29, -256), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0xdd100bbe);
+  // TEST_SINGLE(ldapur(DReg::d30, Reg::r29, 255), "ldapur d30, [x29, #255]");
+  TEST_SINGLE(ldapur(DReg::d30, Reg::r29, 255), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0xdd4ffbbe);
+  // TEST_SINGLE(stlur(QReg::q30, Reg::r29, -256), "stlur q30, [x29, #-256]");
+  TEST_SINGLE(stlur(QReg::q30, Reg::r29, -256), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x1d900bbe);
+  // TEST_SINGLE(ldapur(QReg::q30, Reg::r29, 255), "ldapur q30, [x29, #255]");
+  TEST_SINGLE(ldapur(QReg::q30, Reg::r29, 255), "unimplemented (Unimplemented)");
+  CHECK(DisassembleEncoding(0) == 0x1dcffbbe);
 
   TEST_SINGLE(ldapur(XReg::x30, Reg::r29, -256), "ldapur x30, [x29, #-256]");
   TEST_SINGLE(ldapur(XReg::x30, Reg::r29, 255), "ldapur x30, [x29, #255]");

@@ -27,6 +27,20 @@ constexpr uint32_t RCPC2_MASK = 0x3F'E0'0C'00;
 constexpr uint32_t LDAPUR_INST = 0x19'40'00'00;
 constexpr uint32_t STLUR_INST = 0x19'00'00'00;
 
+// LDAPUR/STLUR (SIMD&FP) and LDUR/STUR (SIMD&FP) share the same mask.
+constexpr uint32_t RCPC3_SIMD_MASK = 0x3F'60'0C'00;
+constexpr uint32_t LDAPUR_SIMD_INST = 0x1D'40'08'00;
+constexpr uint32_t STLUR_SIMD_INST = 0x1D'00'08'00;
+constexpr uint32_t LDUR_SIMD_INST = 0x3C'40'00'00;
+constexpr uint32_t STUR_SIMD_INST = 0x3C'00'00'00;
+
+// LDAP1/STL1 (SIMD&FP) and LD1/ST1 (single structure, 64-bit lane) share the same mask.
+constexpr uint32_t RCPC3_LANE_MASK = 0xBF'FF'FC'00;
+constexpr uint32_t LDAP1_INST = 0x0D'41'84'00;
+constexpr uint32_t STL1_INST = 0x0D'01'84'00;
+constexpr uint32_t LD1_LANE64_INST = 0x0D'40'84'00;
+constexpr uint32_t ST1_LANE64_INST = 0x0D'00'84'00;
+
 constexpr uint32_t LDAXP_MASK = 0xBF'FF'80'00;
 constexpr uint32_t LDAXP_INST = 0x88'7F'80'00;
 
@@ -2160,6 +2174,54 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
     ClearICache(&PC[-1], 8);
     // Back up one instruction and have another go
     return -4;
+  } else if ((Instr & RCPC3_SIMD_MASK) == LDAPUR_SIMD_INST) { // LDAPUR (SIMD&FP)
+    // Size, opc, 9-bit offset and registers are encoded the same as LDUR (SIMD&FP)
+    uint32_t LDUR = LDUR_SIMD_INST;
+    LDUR |= Instr & ~RCPC3_SIMD_MASK;
+    if (HandleType != UnalignedHandlerType::NonAtomic) {
+      // Ordering matters with cross-thread visibility!
+      std::atomic_ref<uint32_t>(PC[1]).store(DMB_LD, std::memory_order_release); // Back-patch the half-barrier.
+    }
+    std::atomic_ref<uint32_t>(PC[0]).store(LDUR, std::memory_order_release);
+    ClearICache(&PC[0], 8);
+    // With the instruction modified, now execute again.
+    return 0;
+  } else if ((Instr & RCPC3_SIMD_MASK) == STLUR_SIMD_INST) { // STLUR (SIMD&FP)
+    // Size, opc, 9-bit offset and registers are encoded the same as STUR (SIMD&FP)
+    uint32_t STUR = STUR_SIMD_INST;
+    STUR |= Instr & ~RCPC3_SIMD_MASK;
+    if (HandleType != UnalignedHandlerType::NonAtomic) {
+      std::atomic_ref<uint32_t>(PC[-1]).store(DMB, std::memory_order_release); // Back-patch the half-barrier.
+    }
+    std::atomic_ref<uint32_t>(PC[0]).store(STUR, std::memory_order_release);
+
+    ClearICache(&PC[-1], 8);
+    // Back up one instruction and have another go
+    return -4;
+  } else if ((Instr & RCPC3_LANE_MASK) == LDAP1_INST) { // LDAP1
+    // Q, registers are encoded the same as LD1 (single structure)
+    uint32_t LD1 = LD1_LANE64_INST;
+    LD1 |= Instr & ~RCPC3_LANE_MASK;
+    if (HandleType != UnalignedHandlerType::NonAtomic) {
+      // Ordering matters with cross-thread visibility!
+      std::atomic_ref<uint32_t>(PC[1]).store(DMB_LD, std::memory_order_release); // Back-patch the half-barrier.
+    }
+    std::atomic_ref<uint32_t>(PC[0]).store(LD1, std::memory_order_release);
+    ClearICache(&PC[0], 8);
+    // With the instruction modified, now execute again.
+    return 0;
+  } else if ((Instr & RCPC3_LANE_MASK) == STL1_INST) { // STL1
+    // Q, registers are encoded the same as ST1 (single structure)
+    uint32_t ST1 = ST1_LANE64_INST;
+    ST1 |= Instr & ~RCPC3_LANE_MASK;
+    if (HandleType != UnalignedHandlerType::NonAtomic) {
+      std::atomic_ref<uint32_t>(PC[-1]).store(DMB, std::memory_order_release); // Back-patch the half-barrier.
+    }
+    std::atomic_ref<uint32_t>(PC[0]).store(ST1, std::memory_order_release);
+
+    ClearICache(&PC[-1], 8);
+    // Back up one instruction and have another go
+    return -4;
   }
 
   // Check if another thread backpatched this instruction before this thread got here
@@ -2167,7 +2229,8 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
   // - Unhandled instruction (Shouldn't occur, FEX programmer error added a new unhandled atomic)
   // - Another thread backpatched an atomic access to be a non-atomic access
   auto AtomicInst = std::atomic_ref<uint32_t>(PC[0]).load(std::memory_order_acquire);
-  if ((AtomicInst & LDSTREGISTER_MASK) == LDR_INST || (AtomicInst & LDSTUNSCALED_MASK) == LDUR_INST) {
+  if ((AtomicInst & LDSTREGISTER_MASK) == LDR_INST || (AtomicInst & LDSTUNSCALED_MASK) == LDUR_INST ||
+      (AtomicInst & RCPC3_SIMD_MASK) == LDUR_SIMD_INST || (AtomicInst & RCPC3_LANE_MASK) == LD1_LANE64_INST) {
     // This atomic instruction was backpatched to a load.
     if (HandleType != UnalignedHandlerType::NonAtomic) {
       // Check if the next instruction is a DMB.
@@ -2179,7 +2242,8 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
       // No DMB instruction with this HandleType.
       return 0;
     }
-  } else if ((AtomicInst & LDSTREGISTER_MASK) == STR_INST || (AtomicInst & LDSTUNSCALED_MASK) == STUR_INST) {
+  } else if ((AtomicInst & LDSTREGISTER_MASK) == STR_INST || (AtomicInst & LDSTUNSCALED_MASK) == STUR_INST ||
+             (AtomicInst & RCPC3_SIMD_MASK) == STUR_SIMD_INST || (AtomicInst & RCPC3_LANE_MASK) == ST1_LANE64_INST) {
     if (HandleType != UnalignedHandlerType::NonAtomic) {
       // Check if the previous instruction is a DMB.
       auto DMBInst = std::atomic_ref<uint32_t>(PC[-1]).load(std::memory_order_acquire);

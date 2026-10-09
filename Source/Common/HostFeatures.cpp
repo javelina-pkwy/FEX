@@ -358,6 +358,7 @@ static void OverrideFeatures(FEXCore::HostFeatures* Features, uint64_t ForceSVEW
   ENABLE_DISABLE_OPTION(SupportsAFP, AFP, AFP);
   ENABLE_DISABLE_OPTION(SupportsRCPC, LRCPC, LRCPC);
   ENABLE_DISABLE_OPTION(SupportsTSOImm9, LRCPC2, LRCPC2);
+  ENABLE_DISABLE_OPTION(SupportsRCPC3, LRCPC3, LRCPC3);
   ENABLE_DISABLE_OPTION(SupportsCSSC, CSSC, CSSC);
   ENABLE_DISABLE_OPTION(SupportsPMULL_128Bit, PMULL128, PMULL128);
   ENABLE_DISABLE_OPTION(SupportsRAND, RNG, RNG);
@@ -496,6 +497,7 @@ void FetchHostFeatures(FEX::CPUFeatures& Features, FEXCore::HostFeatures& HostFe
   HostFeatures.SupportsAFP = Features.Supports(CPUFeatures::Feature::AFP);
   HostFeatures.SupportsRCPC = Features.Supports(CPUFeatures::Feature::LRCPC);
   HostFeatures.SupportsTSOImm9 = Features.Supports(CPUFeatures::Feature::LRCPC2);
+  HostFeatures.SupportsRCPC3 = Features.Supports(CPUFeatures::Feature::LRCPC3);
   HostFeatures.SupportsPMULL_128Bit = Features.Supports(CPUFeatures::Feature::PMULL);
   HostFeatures.SupportsCSSC = Features.Supports(CPUFeatures::Feature::CSSC);
   HostFeatures.SupportsFCMA = Features.Supports(CPUFeatures::Feature::FCMA);
