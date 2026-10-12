@@ -250,6 +250,7 @@ public:
 
           CurrentL1Entries <<= 1;
           L1PointerMask = CurrentL1Entries - 1;
+          CommitL1Cache();
 
           // Update the thread's L1 pointer mask to increase how much cache it uses.
           // Since we're in C-code, this is safe to update here.
@@ -423,6 +424,10 @@ private:
           CacheBlockMapping(FullAddress, Entry, false, lk);
           return;
         }
+
+        // Commit the page pointers around this one before writing to it.
+        const auto PointerOffset = FEXCore::AlignDown(Address * sizeof(uintptr_t), PAGE_POINTER_COMMIT_SIZE);
+        FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(PagePointer + PointerOffset), PAGE_POINTER_COMMIT_SIZE);
         Pointers[Address] = NewPageBacking;
         LocalPagePointer = NewPageBacking;
       }
@@ -447,7 +452,12 @@ private:
     }
 
     AllocateOffset = NewEnd;
+    FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(PageMemory + NewBase), SIZE_PER_PAGE);
     return PageMemory + NewBase;
+  }
+
+  void CommitL1Cache() {
+    FEXCore::Allocator::VirtualCommit(reinterpret_cast<void*>(L1Pointer), (L1PointerMask + 1) * sizeof(LookupCacheEntry));
   }
 
   // Maps from a page index to all blocks in the page that have at some point been fetched into L1/L2
@@ -468,6 +478,8 @@ private:
   constexpr static size_t CODE_SIZE = 128 * 1024 * 1024;
   constexpr static size_t SIZE_PER_PAGE = FEXCore::Utils::FEX_PAGE_SIZE * sizeof(LookupCacheEntry);
   constexpr static size_t MAX_L1_SIZE = MAX_L1_ENTRIES * sizeof(LookupCacheEntry);
+  // Page pointers get committed in 64KB chunks, which is a multiple of the host page size.
+  constexpr static size_t PAGE_POINTER_COMMIT_SIZE = 64 * 1024;
 
   size_t AllocateOffset {};
 

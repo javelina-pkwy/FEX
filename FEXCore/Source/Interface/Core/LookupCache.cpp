@@ -68,6 +68,10 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
     // Start at maximum instead.
     L1PointerMask = MAX_L1_ENTRIES - 1;
   }
+
+  // The cache was allocated uncommitted, commit the part of L1 that is in use.
+  // L2 gets committed as its pages get allocated.
+  CommitL1Cache();
 }
 
 LookupCache::~LookupCache() {
@@ -90,6 +94,7 @@ void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken&) {
   // TODO: Preserve code cache entries?
   // Clear L1 and L2 by clearing the full cache.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
+  CommitL1Cache();
 
   // TODO: Rename this member to avoid confusion with code caching
   CachedCodePages.clear();
