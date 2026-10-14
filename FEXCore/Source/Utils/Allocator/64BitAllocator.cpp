@@ -112,6 +112,18 @@ private:
       return sizeof(LiveVMARegion) + FEXCore::FlexBitSet<FlexBitElementType>::SizeInBytes(NumElements);
     }
 
+    // The tracking bits are mapped read-only until they are written, so they aren't charged towards VmData.
+    // Make the bits tracking [Begin, Begin + Count) writable.
+    void CommitUsedPages(size_t Begin, size_t Count) {
+      auto* MemoryAsBytes = reinterpret_cast<uint8_t*>(UsedPages.Memory);
+      const auto CommitBegin = FEXCore::AlignDown(reinterpret_cast<uintptr_t>(MemoryAsBytes + Begin / 8), FEXCore::Utils::FEX_PAGE_SIZE);
+      const auto CommitEnd = FEXCore::AlignUp(reinterpret_cast<uintptr_t>(MemoryAsBytes + (Begin + Count + 7) / 8), FEXCore::Utils::FEX_PAGE_SIZE);
+
+      auto Res = mprotect(reinterpret_cast<void*>(CommitBegin), CommitEnd - CommitBegin, PROT_READ | PROT_WRITE);
+      LOGMAN_THROW_A_FMT(Res != -1, "Couldn't mprotect region: {} '{}' Likely occurs when running out of memory or Maximum VMAs", errno,
+                         strerror(errno));
+    }
+
     static void InitializeVMARegionUsed(LiveVMARegion* Region) {
       const size_t SizeOfLiveRegion =
         FEXCore::AlignUp(LiveVMARegion::GetFEXManagedVMARegionSize(Region->SlabInfo->RegionSize), FEXCore::Utils::FEX_PAGE_SIZE);
@@ -132,6 +144,7 @@ private:
       ::madvise(MemoryAsBytes, ManagedSize, MADV_WILLNEED);
 
       // Set our reserved pages
+      Region->CommitUsedPages(0, NumManagedPages);
       Region->UsedPages.MemSet(NumManagedPages);
       Region->LastPageAllocation = NumManagedPages;
       Region->NumManagedPages = NumManagedPages;
@@ -161,7 +174,11 @@ private:
     const size_t SizeOfLiveRegion =
       FEXCore::AlignUp(LiveVMARegion::GetFEXManagedVMARegionSize(ReservedRegion->RegionSize), FEXCore::Utils::FEX_PAGE_SIZE);
 
-    auto Res = mprotect(reinterpret_cast<void*>(ReservedRegion->Base), SizeOfLiveRegion, PROT_READ | PROT_WRITE);
+    // Only the LiveVMARegion header is writable up front, the tracking bits get committed as they are used.
+    auto Res = mprotect(reinterpret_cast<void*>(ReservedRegion->Base), SizeOfLiveRegion, PROT_READ);
+    LOGMAN_THROW_A_FMT(Res != -1, "Couldn't mprotect region: {} '{}' Likely occurs when running out of memory or Maximum VMAs", errno,
+                       strerror(errno));
+    Res = mprotect(reinterpret_cast<void*>(ReservedRegion->Base), sizeof(LiveVMARegion), PROT_READ | PROT_WRITE);
     LOGMAN_THROW_A_FMT(Res != -1, "Couldn't mprotect region: {} '{}' Likely occurs when running out of memory or Maximum VMAs", errno,
                        strerror(errno));
 
@@ -404,6 +421,7 @@ again:
     uintptr_t MappedBegin = (AllocatedOffset - RegionBegin) >> FEXCore::Utils::FEX_PAGE_SHIFT;
     size_t PagesSet {};
 
+    LiveRegion->CommitUsedPages(MappedBegin, NumberOfPages);
     for (size_t i = 0; i < NumberOfPages; ++i) {
       PagesSet += LiveRegion->UsedPages.TestAndSet(MappedBegin + i) == false;
     }
@@ -462,6 +480,7 @@ int OSAllocator_64Bit::Munmap(void* addr, size_t length) {
       uint32_t SlabPageBegin = (PtrBegin - RegionBegin) >> FEXCore::Utils::FEX_PAGE_SHIFT;
       uint64_t PagesToFree = length >> FEXCore::Utils::FEX_PAGE_SHIFT;
 
+      (*it)->CommitUsedPages(SlabPageBegin, PagesToFree);
       for (size_t i = 0; i < PagesToFree; ++i) {
         FreedPages += (*it)->UsedPages.TestAndClear(SlabPageBegin + i) ? 1 : 0;
       }
