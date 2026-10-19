@@ -1008,27 +1008,163 @@ DEF_OP(UDiv) {
   }
   case IR::OpSize::i64Bit: {
     ARMEmitter::ForwardLabel Only64Bit {};
+    ARMEmitter::ForwardLabel UpperReduced {};
+    ARMEmitter::ForwardLabel HighDigitDone {};
+    ARMEmitter::ForwardLabel LowDigitDone {};
     ARMEmitter::ForwardLabel LongDIVRet {};
 
     // Check the upper bits for zero
     // If the upper bits are zero then we can do a 64-bit divide
     (void)cbz(EmitSize, Upper, &Only64Bit);
+    // The x86 instruction raises #DE when the divisor is zero. This code does not raise #DE.
+    // It uses the 64-bit divide, which sets the quotient to zero.
+    (void)cbz(EmitSize, Divisor, &Only64Bit);
 
     // Long divide
+    // Adapted from divllu in libdivide: https://github.com/ridiculousfish/libdivide/blob/master/doc/divlu.c
+    // divllu() specifically is licensed as public domain, despite the zlib license that covers the rest of libdivide.
+    // divllu is itself an adaptation of Knuth's classic Algorithm D for long division, with some optimizations.
+    // Where possible we have followed divllu() to the letter, including comments, but some changes were needed
+    // due to our limited set of temp registers.
     {
-      mov(EmitSize, TMP1, Upper);
-      mov(EmitSize, TMP2, Lower);
-      mov(EmitSize, TMP3, Divisor);
+      // We work in base 2**32.
+      // A uint32 holds a single digit. A uint64 holds two digits.
+      // Our numerator is conceptually [num3, num2, num1, num0].
+      // Our denominator is [den1, den0].
 
-      ldr(TMP4, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.LUDIVHandler));
+      // The normalization shift factor.
+      const auto Shift = TMP1;
 
-      str<ARMEmitter::IndexType::PRE>(ARMEmitter::XReg::lr, ARMEmitter::Reg::rsp, -16);
-      blr(TMP4);
-      ldr<ARMEmitter::IndexType::POST>(ARMEmitter::XReg::lr, ARMEmitter::Reg::rsp, 16);
+      // Original values used for the remainder computation (before normalizing).
+      // These are Lower (num10) and Divisor (den10).
 
-      // Move results to the destination registers
-      mov(EmitSize, Quotient, TMP1);
-      mov(EmitSize, Remainder, TMP2);
+      // The divisor, and the high and low words of the dividend.
+      const auto Den = TMP2;
+      const auto NumHi = TMP3;
+      const auto NumLo = TMP4;
+
+      // A partial remainder.
+      const auto Rem = TMP3;
+
+      // Check for overflow and divide by 0.
+      // TODO: IF FEX handled #DE, we could simplify this I think.
+      mov(EmitSize, NumHi, Upper);
+      cmp(EmitSize, Upper, Divisor);
+      (void)b(ARMEmitter::Condition::CC_LO, &UpperReduced);
+      udiv(EmitSize, NumHi, Upper, Divisor);
+      msub(EmitSize, NumHi, NumHi, Divisor, Upper);
+      (void)Bind(&UpperReduced);
+
+      // Determine the normalization factor. We multiply den by this, so that its leading digit is at
+      // least half b. In binary this means just shifting left by the number of leading zeros, so that
+      // there's a 1 in the MSB.
+      // We also shift numer by the same amount. This cannot overflow because numhi < den.
+      // The expression (-shift & 63) is the same as (64 - shift), except it avoids the UB of shifting
+      // by 64. The funny bitwise 'and' ensures that numlo does not get shifted into numhi if shift is 0.
+
+      // shift = divlu_count_leading_zeros64(den);
+      clz(EmitSize, Shift, Divisor);
+      // den <<= shift;
+      lslv(EmitSize, Den, Divisor, Shift);
+      // numhi <<= shift;
+      lslv(EmitSize, NumHi, NumHi, Shift);
+      // numhi |= (numlo >> (-shift & 63)) & (-(int64_t)shift >> 63);
+      neg(EmitSize, Remainder, Shift);
+      lsrv(EmitSize, Remainder, Lower, Remainder);
+      cmp(EmitSize, Shift, 0);
+      csel(EmitSize, Remainder, Remainder, ARMEmitter::Reg::zr, ARMEmitter::Condition::CC_NE);
+      orr(EmitSize, NumHi, NumHi, Remainder);
+      // numlo <<= shift;
+      lslv(EmitSize, NumLo, Lower, Shift);
+
+      // We wish to compute q1 = [n3 n2 n1] / [d1 d0].
+      // Estimate q1 as [n3 n2] / [d1], and then correct it.
+      // Note while qhat may be 2 digits, q1 is always 1 digit.
+      {
+        const auto Den1 = TMP1;
+        const auto Den0 = TMP1;
+
+        // The estimated quotient, and estimated remainder.
+        const auto QHat = Quotient;
+        const auto RHat = Remainder;
+
+        // Variables used to correct the estimated quotient.
+        const auto C1 = TMP1;
+        const auto C2 = Remainder;
+
+        // qhat = numhi / den1;
+        lsr(EmitSize, Den1, Den, 32);
+        udiv(EmitSize, QHat, NumHi, Den1);
+        // rhat = numhi % den1;
+        msub(EmitSize, RHat, QHat, Den1, NumHi);
+        // c1 = qhat * den0;
+        mov(ARMEmitter::Size::i32Bit, Den0, Den);
+        mul(EmitSize, C1, QHat, Den0);
+        // c2 = rhat * b + num1;
+        extr(EmitSize, C2, RHat, NumLo, 32);
+        // if (c1 > c2)
+        //     qhat -= (c1 - c2 > den) ? 2 : 1;
+        // C1 holds c1 - c2 after the subs.
+        subs(EmitSize, C1, C1, C2);
+        (void)b(ARMEmitter::Condition::CC_LS, &HighDigitDone);
+        sub(EmitSize, QHat, QHat, 1);
+        cmp(EmitSize, C1, Den);
+        (void)b(ARMEmitter::Condition::CC_LS, &HighDigitDone);
+        sub(EmitSize, QHat, QHat, 1);
+        (void)Bind(&HighDigitDone);
+        // q1 = (uint32_t)qhat;
+        // This move is a nop for us.
+      }
+
+      // Compute the true (partial) remainder.
+      // rem = numhi * b + num1 - q1 * den;
+      extr(EmitSize, Rem, NumHi, NumLo, 32);
+      msub(EmitSize, Rem, Quotient, Den, Rem);
+
+      // We wish to compute q0 = [rem1 rem0 n0] / [d1 d0].
+      // Estimate q0 as [rem1 rem0] / [d1] and correct it.
+      {
+        const auto Den1 = TMP1;
+        const auto Den0 = TMP3;
+
+        // The estimated quotient, and its corresponding remainder
+        const auto QHat = Remainder;
+        const auto RHat = TMP1;
+
+        // Variables used to correct the estimated quotient.
+        const auto C1 = TMP3;
+        const auto C2 = NumLo;
+
+        // qhat = rem / den1;
+        lsr(EmitSize, Den1, Den, 32);
+        udiv(EmitSize, QHat, Rem, Den1);
+        // rhat = rem % den1;
+        msub(EmitSize, RHat, QHat, Den1, Rem);
+        // c1 = qhat * den0;
+        mov(ARMEmitter::Size::i32Bit, Den0, Den);
+        mul(EmitSize, C1, QHat, Den0);
+        // c2 = rhat * b + num0;
+        bfi(EmitSize, C2, RHat, 32, 32);
+        // if (c1 > c2)
+        //     qhat -= (c1 - c2 > den) ? 2 : 1;
+        // C1 holds c1 - c2 after the subs.
+        subs(EmitSize, C1, C1, C2);
+        (void)b(ARMEmitter::Condition::CC_LS, &LowDigitDone);
+        sub(EmitSize, QHat, QHat, 1);
+        cmp(EmitSize, C1, Den);
+        (void)b(ARMEmitter::Condition::CC_LS, &LowDigitDone);
+        sub(EmitSize, QHat, QHat, 1);
+        (void)Bind(&LowDigitDone);
+        // q0 = (uint32_t)qhat;
+        // This move is a nop for us.
+      }
+
+      // q = ((uint64_t)q1 << 32) | q0;
+      orr(EmitSize, Quotient, Remainder, Quotient, ARMEmitter::ShiftType::LSL, 32);
+
+      // Return remainder.
+      // *r = num10 - q * den10;
+      msub(EmitSize, Remainder, Quotient, Divisor, Lower);
 
       // Skip 64-bit path
       (void)b(&LongDIVRet);

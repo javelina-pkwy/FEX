@@ -627,7 +627,6 @@ void Dispatcher::EmitDispatcher() {
     return Address;
   };
 
-  LUDIVHandlerAddress = EmitLongALUOpHandler(STATE_PTR(CpuStateFrame, Pointers.LUDIV));
   LDIVHandlerAddress = EmitLongALUOpHandler(STATE_PTR(CpuStateFrame, Pointers.LDIV));
 
   EmitF64Sin();
@@ -2713,7 +2712,6 @@ void Dispatcher::InitThreadPointers(FEXCore::Core::InternalThreadState* Thread) 
     Ptrs.GuestSignal_SynchronousFault = GuestSignal_SynchronousFault;
     Ptrs.SignalReturnHandler = SignalHandlerReturnAddress;
     Ptrs.SignalReturnHandlerRT = SignalHandlerReturnAddressRT;
-    Ptrs.LUDIVHandler = LUDIVHandlerAddress;
     Ptrs.LDIVHandler = LDIVHandlerAddress;
     Ptrs.F64SinHandler = F64SinHandlerAddress;
     Ptrs.F64CosHandler = F64CosHandlerAddress;

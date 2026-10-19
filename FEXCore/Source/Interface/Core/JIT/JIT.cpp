@@ -51,14 +51,6 @@ struct DivRem {
   uint64_t Remainder;
 };
 
-static struct DivRem LUDIV(uint64_t SrcHigh, uint64_t SrcLow, uint64_t Divisor) {
-  __uint128_t Source = (static_cast<__uint128_t>(SrcHigh) << 64) | SrcLow;
-
-  return {
-    .Quotient = (uint64_t)(Source / Divisor),
-    .Remainder = (uint64_t)(Source % Divisor),
-  };
-}
 
 static struct DivRem
 LDIV(uint64_t SrcHigh, uint64_t SrcLow, int64_t Divisor) {
@@ -697,7 +689,6 @@ Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::In
       Ptrs.SyscallHandlerFunc = PMF.GetVTableEntry(CTX->SyscallHandler);
     }
     Ptrs.ExitFunctionLink = reinterpret_cast<uintptr_t>(&Arm64JITCore::ExitFunctionLink);
-    Ptrs.LUDIV = reinterpret_cast<uint64_t>(LUDIV);
     Ptrs.LDIV = reinterpret_cast<uint64_t>(LDIV);
     Ptrs.RDRANDFallback = reinterpret_cast<uint64_t>(RDRANDFallback);
   }
