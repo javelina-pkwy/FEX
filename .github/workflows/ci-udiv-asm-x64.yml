@@ -26,7 +26,7 @@ jobs:
     - name: Configure
       run: |
         cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-          -DENABLE_LTO=False -DENABLE_ASSERTIONS=True -DBUILD_TESTING=ON -DBUILD_FEXCONFIG=OFF -DBUILD_THUNKS=OFF
+          -DENABLE_LTO=False -DENABLE_ASSERTIONS=True -DENABLE_X86_HOST_DEBUG=True -DBUILD_TESTING=ON -DBUILD_FEXCONFIG=OFF -DBUILD_THUNKS=OFF
 
     - name: Build
       run: cmake --build build --target TestHarnessRunner asm_files
