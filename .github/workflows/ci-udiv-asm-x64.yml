@@ -34,5 +34,5 @@ jobs:
     - name: Run
       run: |
         cd build
-        ctest -N | grep 3_F7_06
-        ctest -R 'host/Test_64Bit_PrimaryGroup/3_F7_06' --output-on-failure || true
+        ctest -N | grep -E '3_F7_0[67]|LongSignedDivide'
+        ctest -R 'host/Test_64Bit_(PrimaryGroup/3_F7_0[67]|FEX_bugs/LongSignedDivide)' --output-on-failure || true
