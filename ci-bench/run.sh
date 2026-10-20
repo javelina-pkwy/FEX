@@ -2,7 +2,8 @@
 # Native x86 timings of the same divide benchmarks FEX runs. ns per divide; ludiv_bench modes subtract a reps=0 run.
 set -u
 cd "$(dirname "$0")"
-for b in dumb_div ludiv_bench idiv_bench; do gcc -O2 -o $b $b.c; done
+for b in dumb_div ludiv_bench idiv_bench freq; do gcc -O2 -o $b $b.c; done
+./freq
 ns() { local s=$(date +%s%N); "$@" > /dev/null; echo $(( $(date +%s%N) - s )); }
 for t in 1 2 3 4 5; do
   echo "trial $t: $(./dumb_div | grep -oE '[0-9.]+ ns/divide') dumb_div | $(./idiv_bench div | grep -oE '[0-9.]+ ns/divide') long div | $(./idiv_bench idiv | grep -oE '[0-9.]+ ns/divide') long idiv"
@@ -12,3 +13,5 @@ for t in 1 2 3 4 5; do
     echo "  $mode $(echo "scale=2; ($t1 - $t0) / ($reps * $per)" | bc) ns per op"
   done
 done
+./freq
+(command -v perf >/dev/null || sudo apt-get install -y -qq linux-tools-common linux-tools-$(uname -r) >/dev/null 2>&1); perf stat -e cycles,task-clock ./dumb_div 2>&1 | tail -15 || echo "perf unavailable"
