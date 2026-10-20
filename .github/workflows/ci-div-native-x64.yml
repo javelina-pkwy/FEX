@@ -1,0 +1,16 @@
+name: CI div native x64
+
+on:
+  push:
+    branches:
+      - ci/div-native-x64
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: CPU
+      run: lscpu | grep -E "Model name|Vendor ID|MHz|Hypervisor"; nproc
+    - name: Bench
+      run: ci-bench/run.sh
