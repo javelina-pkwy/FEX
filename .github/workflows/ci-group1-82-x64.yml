@@ -1,0 +1,38 @@
+name: CI group1 0x82 x64
+
+on:
+  push:
+    branches:
+      - ci/group1-82-x64
+
+jobs:
+  hostrunner:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Submodules
+      run: |
+        git submodule update --init --depth 1 External/fmt External/xxhash External/Catch2 External/range-v3 \
+          External/unordered_dense External/rpmalloc External/jemalloc_glibc External/vixl External/zydis \
+          External/tracy External/drm-headers External/Vulkan-Headers Source/Common/cpp-optparse
+
+    - name: Dependencies
+      run: sudo apt-get update && sudo apt-get install -y clang lld nasm ninja-build cmake python3
+
+    - name: CPU
+      run: lscpu | grep -E "Model name|Vendor ID|Hypervisor|Virtualization"
+
+    - name: Configure
+      run: |
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DENABLE_LTO=False -DENABLE_ASSERTIONS=True -DENABLE_X86_HOST_DEBUG=True -DBUILD_TESTING=ON -DBUILD_FEXCONFIG=OFF -DBUILD_THUNKS=OFF
+
+    - name: Build
+      run: cmake --build build --target TestHarnessRunner 32bit_asm_files
+
+    - name: Run
+      run: |
+        cd build
+        ctest -N -R 'host/Test_32Bit_PrimaryGroup/1_82_0'
+        ctest -R 'host/Test_32Bit_PrimaryGroup/1_82_0' --output-on-failure
