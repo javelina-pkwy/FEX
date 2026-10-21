@@ -1,0 +1,30 @@
+name: CI group1 0x82 sigill x64
+
+on:
+  push:
+    branches:
+      - ci/group1-82-sigill-x64
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: CPU
+      run: lscpu | grep -E "Model name|Vendor ID"
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y ninja-build clang lld gcc-multilib g++-multilib
+
+    - name: Checkout Catch2
+      run: git submodule update --init --depth 1 External/Catch2
+
+    - name: Build
+      run: |
+        cmake -S unittests/FEXLinuxTests/tests -B build_64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$PWD/Data/CMake/toolchain_x86_64.cmake -DENABLE_CLANG_THUNKS=True -DBITNESS=64
+        ninja -C build_64 invalid_group1_82.64
+
+    - name: Run natively
+      run: ./build_64/invalid_group1_82.64 --success
