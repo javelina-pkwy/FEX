@@ -229,6 +229,16 @@ FEXCore::HLE::ExecutableRangeInfo SyscallHandler::QueryGuestExecutableRange(FEXC
   return {Entry->first, Entry->second.Length, Entry->second.Prot.Writable};
 }
 
+bool SyscallHandler::IsGuestAddressExecutableInSignalHandler(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) {
+  // Can't use the deferred signal lock in the SIGSEGV handler.
+  auto lk = FEXCore::MaskSignalsAndLockMutex<std::shared_lock>(VMATracking.Mutex);
+  auto ThreadObject = FEX::HLE::ThreadManager::GetStateObjectFromFEXCoreThread(Thread);
+
+  auto Entry = VMATracking.FindVMAEntry(Address);
+  return Entry != VMATracking.VMAs.end() &&
+         (Entry->second.Prot.Executable || ((ThreadObject->persona & READ_IMPLIES_EXEC) && Entry->second.Prot.Readable));
+}
+
 struct ReadELFHeadersResult {
   fextl::vector<Elf64_Phdr> ProgramHeaders;
   fextl::robin_map<uint32_t, FEXCore::GuestRelocationType> Relocations;

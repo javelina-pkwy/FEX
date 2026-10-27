@@ -296,6 +296,8 @@ public:
   int OpenCodeMapFile() override;
 
   FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) override;
+  // Same check as QueryGuestExecutableRange, but safe to call from a host signal handler
+  bool IsGuestAddressExecutableInSignalHandler(FEXCore::Core::InternalThreadState* Thread, uint64_t Address);
 
   ///// FORK tracking /////
   void LockBeforeFork(FEXCore::Core::InternalThreadState* Thread);
