@@ -438,7 +438,7 @@ uint64_t SignalDelegator::SetupFrame_x64(FEXCore::Core::InternalThreadState* Thr
 
     // Overwrite si_code and si_addr
     guest_siginfo->si_code = Thread->CurrentFrame->SynchronousFaultData.si_code;
-    guest_siginfo->si_addr = reinterpret_cast<void*>(ContextBackup->OriginalRIP);
+    guest_siginfo->si_addr = reinterpret_cast<void*>(ContextBackup->OriginalRIP + Frame->SynchronousFaultData.FaultAddressOffset);
     Signal = Frame->SynchronousFaultData.Signal;
   } else {
     guest_uctx->uc_mcontext.gregs[FEXCore::x86_64::FEX_REG_TRAPNO] = ConvertSignalToTrapNo(Signal, HostSigInfo);
@@ -796,6 +796,9 @@ uint64_t SignalDelegator::SetupRTFrame_ia32(FEXCore::Core::InternalThreadState* 
     // Macro expansion to get the si_addr
     // Can't really give a real result here. Pull from the context for now
     guest_uctx->info._sifields._sigfault.addr = ContextBackup->OriginalRIP;
+    if (ContextBackup->FaultToTopAndGeneratedException) {
+      guest_uctx->info._sifields._sigfault.addr += Frame->SynchronousFaultData.FaultAddressOffset;
+    }
     break;
   case SigInfoLayout::LAYOUT_CHLD:
     guest_uctx->info._sifields._sigchld.pid = HostSigInfo->si_pid;

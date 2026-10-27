@@ -721,7 +721,13 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
             } else if (Block.BlockStatus == Frontend::Decoder::DecodedBlockStatus::UNIMPLEMENTED_INST) {
               Thread->OpDispatcher->UnimplementedOp(DecodedInfo);
             } else {
-              Thread->OpDispatcher->NoExecOp(DecodedInfo);
+              // An instruction that starts in executable memory but runs into a non-executable page faults on the first
+              // byte of that page, which is what the guest fault handler needs to see (e.g. to map in the next page).
+              uint8_t FaultAddressOffset = 0;
+              if (Block.BlockStatus == Frontend::Decoder::DecodedBlockStatus::PARTIAL_DECODE_INST) {
+                FaultAddressOffset = FEXCore::AlignUp(InstAddress + 1, FEXCore::Utils::FEX_PAGE_SIZE) - InstAddress;
+              }
+              Thread->OpDispatcher->NoExecOp(DecodedInfo, FaultAddressOffset);
             }
           }
 

@@ -124,6 +124,8 @@
     "  uint8_t Signal;",
     "  uint8_t TrapNumber;",
     "  uint8_t si_code;",
+    "  // Offset from RIP of the faulting byte, reported as the fault address (instruction fetch faults)",
+    "  uint8_t FaultAddressOffset {};",
     "};"
   ],
   "IRTypes" : {
