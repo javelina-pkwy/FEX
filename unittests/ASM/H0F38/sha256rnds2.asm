@@ -9,7 +9,10 @@
       "XMM6": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"],
       "XMM0": ["0xBB5A9A6046F6F8D0", "0x39C210E660786A57"],
       "XMM7": ["0x8013E21F99A0FC9C", "0x0F9B1B966B7CACFE"],
-      "XMM9": ["0x499793854A5D5652", "0xB519225A80462AB4"]
+      "XMM9": ["0x499793854A5D5652", "0xB519225A80462AB4"],
+      "XMM10": ["0x3E4B561875127AA5", "0x6C5ED7074C69CB40"],
+      "XMM12": ["0xCF74894E65DDAE89", "0xD0FE60BF24CA8913"],
+      "XMM13": ["0xCC23CC32EED51377", "0xE4121F2F81CEFB11"]
   },
   "HostFeatures": ["SHA"]
 }
@@ -38,6 +41,26 @@ movaps xmm6, [rdx + 16 * 1]
 sha256rnds2 xmm5, xmm6
 psrldq xmm0, 8
 sha256rnds2 xmm6, xmm5
+
+; The pshufd form with operands that alias each other or the implicit xmm0
+movaps xmm0, [rdx + 16 * 2]
+movaps xmm10, [rdx + 16 * 0]
+sha256rnds2 xmm10, xmm10
+pshufd xmm0, xmm0, 0xe
+sha256rnds2 xmm10, xmm10
+
+movaps xmm0, [rdx + 16 * 2]
+movaps xmm11, [rdx + 16 * 0]
+sha256rnds2 xmm11, xmm0
+pshufd xmm0, xmm0, 0xe
+sha256rnds2 xmm0, xmm11
+movaps xmm13, xmm0
+
+movaps xmm0, [rdx + 16 * 2]
+movaps xmm12, [rdx + 16 * 1]
+sha256rnds2 xmm0, xmm12
+pshufd xmm0, xmm0, 0xe
+sha256rnds2 xmm12, xmm0
 
 ; Operands that alias each other or the implicit xmm0
 movaps xmm0, [rdx + 16 * 2]
