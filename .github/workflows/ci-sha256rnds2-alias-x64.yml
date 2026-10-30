@@ -1,0 +1,44 @@
+name: CI sha256rnds2 alias x64
+
+on:
+  push:
+    branches:
+      - ci/sha256rnds2-alias-x64
+
+jobs:
+  hostrunner:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Submodules
+      run: |
+        git submodule update --init --depth 1 External/fmt External/xxhash External/Catch2 External/range-v3 \
+          External/unordered_dense External/rpmalloc External/jemalloc_glibc External/vixl External/zydis \
+          External/tracy External/drm-headers External/Vulkan-Headers Source/Common/cpp-optparse
+
+    - name: Dependencies
+      run: sudo apt-get update && sudo apt-get install -y clang lld nasm ninja-build cmake python3
+
+    - name: CPU
+      run: |
+        lscpu | grep -E "Model name|Vendor ID|Hypervisor"
+        grep -o -w -m1 sha_ni /proc/cpuinfo || echo "NO sha_ni"
+
+    - name: Configure
+      run: |
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DENABLE_LTO=False -DENABLE_ASSERTIONS=True -DENABLE_X86_HOST_DEBUG=True -DBUILD_TESTING=ON -DBUILD_FEXCONFIG=OFF -DBUILD_THUNKS=OFF
+
+    - name: Build
+      run: cmake --build build --target TestHarnessRunner asm_files
+
+    - name: Run
+      run: |
+        cd build
+        ctest -N | grep -E 'host/Test_64Bit_H0F38/sha256rnds2'
+        ctest -V -R 'host/Test_64Bit_H0F38/sha256rnds2\.asm$' --output-on-failure
+        if ctest -R 'host/Test_64Bit_H0F38/sha256rnds2_negctl\.asm$' --output-on-failure; then
+          echo "Negative control passed, so the test did not really run"; exit 1
+        fi
+        echo "Negative control failed as expected"

@@ -6,7 +6,10 @@
       "XMM3": ["0x97D4574EE323773D", "0xA934C32F562D8E88"],
       "XMM4": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"],
       "XMM5": ["0x97D4574EE323773D", "0xA934C32F562D8E88"],
-      "XMM6": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"]
+      "XMM6": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"],
+      "XMM0": ["0xBB5A9A6046F6F8D0", "0x39C210E660786A57"],
+      "XMM7": ["0x8013E21F99A0FC9C", "0x0F9B1B966B7CACFE"],
+      "XMM9": ["0x499793854A5D5652", "0xB519225A80462AB4"]
   },
   "HostFeatures": ["SHA"]
 }
@@ -35,6 +38,15 @@ movaps xmm6, [rdx + 16 * 1]
 sha256rnds2 xmm5, xmm6
 psrldq xmm0, 8
 sha256rnds2 xmm6, xmm5
+
+; Operands that alias each other or the implicit xmm0
+movaps xmm0, [rdx + 16 * 2]
+movaps xmm7, [rdx + 16 * 0]
+sha256rnds2 xmm7, xmm7
+movaps xmm9, [rdx + 16 * 0]
+sha256rnds2 xmm9, xmm0
+movaps xmm8, [rdx + 16 * 1]
+sha256rnds2 xmm0, xmm8
 
 hlt
 
