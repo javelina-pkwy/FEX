@@ -175,13 +175,13 @@ void OpDispatchBuilder::SHA256RNDS2Op(OpcodeArgs) {
   //   pshufd xmm0, xmm0, 0xe (or psrldq xmm0, 8)
   //   sha256rnds2 xmm2, xmm1
   // This is an idiom used by various crypto libraries (OpenSSL etc).
-  // Since the ARM64 SHA256 instructions compute all four rounds, 
+  // Since the ARM64 SHA256 instructions compute all four rounds,
   // we can elide the second SHA256RNDS2 and the key shuffle.
   // Since this matching is done on IR nodes, this is somewhat fragile,
   // since changes to the translation of the constitiuent instructions
   // would break the pattern.
   //
-  // NB: xmm1 and xmm2 are used here as examples, but note that 
+  // NB: xmm1 and xmm2 are used here as examples, but note that
   // xmm0 is hardcoded as the key register in sha256rnds2.
 
   if (Op->Dest.IsGPR() && Op->Src[0].IsGPR()) {
@@ -193,8 +193,8 @@ void OpDispatchBuilder::SHA256RNDS2Op(OpcodeArgs) {
     const int KeyIndex = FPR0Index;
     const int XIndex = FPR0Index + X;
     const int YIndex = FPR0Index + Y;
-  
-    // It is helpful to remember that the current Op 
+
+    // It is helpful to remember that the current Op
     // is the "second" SHA256RNDS2 in the example, so we are looking
     // backwards to find the rest of the pattern.
     const Ref XLastWritten = RegCache.LastDef[XIndex];
