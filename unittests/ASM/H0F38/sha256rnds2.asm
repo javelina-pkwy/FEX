@@ -2,7 +2,11 @@
 {
   "RegData": {
       "XMM1": ["0x97D4574EE323773D", "0xA934C32F562D8E88"],
-      "XMM2": ["0x6868C3F3AAED56E0", "0xF0FCE9E294E6E6DE"]
+      "XMM2": ["0x6868C3F3AAED56E0", "0xF0FCE9E294E6E6DE"],
+      "XMM3": ["0x97D4574EE323773D", "0xA934C32F562D8E88"],
+      "XMM4": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"],
+      "XMM5": ["0x97D4574EE323773D", "0xA934C32F562D8E88"],
+      "XMM6": ["0x12EC0B542095D0D2", "0x6BDF510B9C287D67"]
   },
   "HostFeatures": ["SHA"]
 }
@@ -15,6 +19,22 @@ movaps xmm1, [rdx + 16 * 0]
 movaps xmm2, [rdx + 16 * 1]
 
 sha256rnds2 xmm1, xmm2
+
+; Cribbed from OpenSSL, they use this idiom
+; and this is the pattern we are looking for in the peephole.
+movaps xmm3, [rdx + 16 * 0]
+movaps xmm4, [rdx + 16 * 1]
+sha256rnds2 xmm3, xmm4
+pshufd xmm0, xmm0, 0xe
+sha256rnds2 xmm4, xmm3
+
+; We also look for this pattern.
+movaps xmm0, [rdx + 16 * 2]
+movaps xmm5, [rdx + 16 * 0]
+movaps xmm6, [rdx + 16 * 1]
+sha256rnds2 xmm5, xmm6
+psrldq xmm0, 8
+sha256rnds2 xmm6, xmm5
 
 hlt
 
