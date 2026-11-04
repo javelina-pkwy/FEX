@@ -36,8 +36,9 @@ bool IsBlockExit(FEXCore::IR::IROps Op) {
 }
 
 std::pair<bool*, bool*> GetFallbackAFPFlags(IROp_Header* Op) {
-#define AFP_FLAGS(Type) \
-  case Type::OPCODE: return {&Op->CW<Type>()->ClearAFP, &Op->CW<Type>()->RestoreAFP}
+#define AFP_FLAGS(Type)                                                              \
+  case Type::OPCODE: return { &Op->CW<Type>()->ClearAFP, &Op->CW<Type>()->RestoreAFP \
+    }
   switch (Op->Op) {
     AFP_FLAGS(IROp_F80Add);
     AFP_FLAGS(IROp_F80Sub);
