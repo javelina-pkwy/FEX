@@ -98,7 +98,8 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
     // An x87 fallback op inside a run of fallback calls skips the AFP clear or set with an ABI handler variant.
     size_t AFPVariantOffset = 0;
     if (const auto [ClearAFP, RestoreAFP] = IR::GetFallbackAFPFlags(IR->GetOp<IR::IROp_Header>(Node)); ClearAFP && !(*ClearAFP && *RestoreAFP)) {
-      AFPVariantOffset = ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, Pointers.FallbackHandlerAFPPointers, *ClearAFP | (*RestoreAFP << 1)) -
+      const auto Variant = (*ClearAFP ? FEXCore::Core::AFPVARIANT_CLEAR : 0) | (*RestoreAFP ? FEXCore::Core::AFPVARIANT_SET : 0);
+      AFPVariantOffset = ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, Pointers.FallbackHandlerAFPPointers, Variant) -
                          offsetof(FEXCore::Core::CpuStateFrame, Pointers.FallbackHandlerPointers);
     }
 

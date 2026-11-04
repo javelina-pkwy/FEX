@@ -359,6 +359,18 @@ enum FallbackHandlerIndex {
   OPINDEX_MAX,
 };
 
+// ABI handler variants for x87 fallback calls in a run of fallback calls.
+// Each bit selects an FPCR AFP operation that the variant does.
+// The default ABI handler does both operations, so it is not a variant.
+enum FallbackAFPVariant {
+  AFPVARIANT_NONE = 0,
+  AFPVARIANT_CLEAR = 1 << 0,
+  AFPVARIANT_SET = 1 << 1,
+
+  // Maximum
+  AFPVARIANT_MAX = AFPVARIANT_CLEAR | AFPVARIANT_SET,
+};
+
 struct FallbackABIInfo {
   uint64_t ABIHandler;
   uint64_t Func;
@@ -430,7 +442,7 @@ struct JITPointers {
   alignas(16) uint64_t NamedVectorConstants[FEXCore::IR::NamedVectorConstant::NAMED_VECTOR_CONST_POOL_MAX][2];
 
   // FallbackHandlerPointers with the ABI handler variants of Dispatcher::ABIPointersAFP.
-  FallbackABIInfo FallbackHandlerAFPPointers[3][FallbackHandlerIndex::OPINDEX_MAX];
+  FallbackABIInfo FallbackHandlerAFPPointers[FallbackAFPVariant::AFPVARIANT_MAX][FallbackHandlerIndex::OPINDEX_MAX];
 };
 
 // Each guest JIT frame has one of these

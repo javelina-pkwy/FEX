@@ -645,10 +645,10 @@ void Dispatcher::EmitDispatcher() {
 
     for (auto ABI : ABIS) {
       ABIPointers[ABI] = GenerateABICall(ABI);
-      for (size_t i = 0; i < ABIPointersAFP.size(); ++i) {
-        ClearAFPOnSpill = i & 1;
-        SetAFPOnFill = i & 2;
-        ABIPointersAFP[i][ABI] = GenerateABICall(ABI);
+      for (size_t Variant = 0; Variant < ABIPointersAFP.size(); ++Variant) {
+        ClearAFPOnSpill = Variant & FEXCore::Core::AFPVARIANT_CLEAR;
+        SetAFPOnFill = Variant & FEXCore::Core::AFPVARIANT_SET;
+        ABIPointersAFP[Variant][ABI] = GenerateABICall(ABI);
       }
       ClearAFPOnSpill = true;
       SetAFPOnFill = true;
@@ -2710,8 +2710,8 @@ void Dispatcher::InitThreadPointers(FEXCore::Core::InternalThreadState* Thread) 
 
     // Fill in the fallback handlers
     InterpreterOps::FillFallbackIndexPointers(Ptrs.FallbackHandlerPointers, &ABIPointers[0]);
-    for (size_t i = 0; i < ABIPointersAFP.size(); ++i) {
-      InterpreterOps::FillFallbackIndexPointers(Ptrs.FallbackHandlerAFPPointers[i], &ABIPointersAFP[i][0]);
+    for (size_t Variant = 0; Variant < ABIPointersAFP.size(); ++Variant) {
+      InterpreterOps::FillFallbackIndexPointers(Ptrs.FallbackHandlerAFPPointers[Variant], &ABIPointersAFP[Variant][0]);
     }
   }
 }
