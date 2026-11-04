@@ -95,6 +95,13 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
     LOGMAN_MSG_A_FMT("Unhandled IR Op: {}", FEXCore::IR::GetName(IROp->Op));
 #endif
   } else {
+    // An x87 fallback op inside a run of fallback calls skips the AFP clear or set with an ABI handler variant.
+    size_t AFPVariantOffset = 0;
+    if (const auto [ClearAFP, RestoreAFP] = IR::GetFallbackAFPFlags(IR->GetOp<IR::IROp_Header>(Node)); ClearAFP && !(*ClearAFP && *RestoreAFP)) {
+      AFPVariantOffset = ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, Pointers.FallbackHandlerAFPPointers, *ClearAFP | (*RestoreAFP << 1)) -
+                         offsetof(FEXCore::Core::CpuStateFrame, Pointers.FallbackHandlerPointers);
+    }
+
     auto FillF80x2Result = [&](auto DstLo, auto DstHi) {
       mov(DstLo.Q(), VTMP1.Q());
       mov(DstHi.Q(), VTMP2.Q());
@@ -146,7 +153,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       fmov(VTMP1.S(), Src1.S());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -164,7 +171,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       fmov(VTMP1.D(), Src1.D());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -189,7 +196,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
         mov(ARMEmitter::Size::i32Bit, TMP2, Src1);
       }
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -207,7 +214,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -225,7 +232,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -243,7 +250,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       fmov(VTMP1.D(), Src1.D());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -267,7 +274,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
 
       fmov(VTMP1.D(), Src1.D());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -289,7 +296,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       fmov(VTMP1.D(), Src1.D());
       fmov(VTMP2.D(), Src2.D());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -307,7 +314,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -325,7 +332,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -343,7 +350,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -364,7 +371,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       mov(VTMP1.Q(), Src1.Q());
       mov(VTMP2.Q(), Src2.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -382,7 +389,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       const auto Src1 = GetVReg(IROp->Args[0]);
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -407,7 +414,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
 
       mov(VTMP1.Q(), Src1.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -429,7 +436,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       mov(VTMP1.Q(), Src1.Q());
       mov(VTMP2.Q(), Src2.Q());
 
-      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP1);
 
@@ -447,7 +454,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       // tmp2 (x1/x11): source 2
       // tmp3 (x2/x12): source 3
       const auto Op = IROp->C<IR::IROp_VPCMPESTRX>();
-      ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
 
       stp<ARMEmitter::IndexType::PRE>(TMP1, ARMEmitter::XReg::lr, ARMEmitter::Reg::rsp, -16);
@@ -489,7 +496,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
       mov(VTMP2.Q(), Src2.Q());
       movz(ARMEmitter::Size::i32Bit, TMP1, Control);
 
-      ldr(TMP2, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
+      ldr(TMP2, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler) + AFPVariantOffset);
       ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
       blr(TMP2);
 

@@ -131,6 +131,10 @@ protected:
 
   bool SupportCodeRelocations;
 
+  // Spill clears and fill sets the FPCR AFP bits. Only changed for the x87 fallback ABI handler variants.
+  bool ClearAFPOnSpill {true};
+  bool SetAFPOnFill {true};
+
   struct FillSpecialRegsOptions {
     // Whether or not to set the FPCR.FIZ (flush inputs to zero) bit in the FPCR to
     // the current value of the emulated MXCSR.DAZ bit.

@@ -93,6 +93,8 @@ private:
 
   uint64_t PauseReturnInstruction {};
   std::array<uint64_t, FallbackABI::FABI_UNKNOWN> ABIPointers {};
+  // ABI handlers that skip the AFP clear (index bit 0 clear) or the AFP set (index bit 1 clear).
+  std::array<std::array<uint64_t, FallbackABI::FABI_UNKNOWN>, 3> ABIPointersAFP {};
   /**  @} */
 
   uint64_t Start {};

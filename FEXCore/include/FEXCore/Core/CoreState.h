@@ -428,6 +428,9 @@ struct JITPointers {
 
   // Copy of process-wide named vector constants data.
   alignas(16) uint64_t NamedVectorConstants[FEXCore::IR::NamedVectorConstant::NAMED_VECTOR_CONST_POOL_MAX][2];
+
+  // FallbackHandlerPointers with the ABI handler variants of Dispatcher::ABIPointersAFP.
+  FallbackABIInfo FallbackHandlerAFPPointers[3][FallbackHandlerIndex::OPINDEX_MAX];
 };
 
 // Each guest JIT frame has one of these

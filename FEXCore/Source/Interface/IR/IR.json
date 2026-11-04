@@ -3061,7 +3061,7 @@
         "HasSideEffects": true,
         "X87": true
       },
-      "FPR = F80Add FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80Add FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3089,7 +3089,7 @@
         "HasSideEffects": true,
         "X87": true
       },
-      "FPR = F80Sub FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80Sub FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "Desc": [
           "Subtracts the value in $X80Src1 from the value in $X80Src2.",
           "The result is returned.",
@@ -3112,7 +3112,7 @@
         "HasSideEffects": true,
         "X87": true
       },
-      "FPR = F80Mul FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80Mul FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3143,7 +3143,7 @@
         "HasSideEffects": true,
         "X87": true
       },
-      "FPR = F80Div FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80Div FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "Desc": [
           "Divides the value in $X80Src1 by the value in $X80Src2.",
           "The result is returned.",
@@ -3192,7 +3192,7 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80ATAN FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80ATAN FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3200,7 +3200,7 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80FPREM FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80FPREM FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3208,7 +3208,7 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80FPREM1 FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80FPREM1 FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3216,23 +3216,23 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80SCALE FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80SCALE FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80CVT OpSize:#Size, FPR:$X80Src": {
+      "FPR = F80CVT OpSize:#Size, FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "Size",
         "JITDispatch": false
       },
-      "GPR = F80CVTInt OpSize:#Size, FPR:$X80Src, i1:$Truncate": {
+      "GPR = F80CVTInt OpSize:#Size, FPR:$X80Src, i1:$Truncate, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "Size",
         "JITDispatch": false
       },
-      "FPR = F80CVTTo FPR:$X80Src, OpSize:$SrcSize": {
+      "FPR = F80CVTTo FPR:$X80Src, OpSize:$SrcSize, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80CVTToInt GPR:$Src, OpSize:$SrcSize": {
+      "FPR = F80CVTToInt GPR:$Src, OpSize:$SrcSize, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3243,7 +3243,7 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80Round FPR:$X80Src": {
+      "FPR = F80Round FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3251,11 +3251,11 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80F2XM1 FPR:$X80Src": {
+      "FPR = F80F2XM1 FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80TAN FPR:$X80Src": {
+      "FPR = F80TAN FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3263,7 +3263,7 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80SIN FPR:$X80Src": {
+      "FPR = F80SIN FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3271,11 +3271,11 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80COS FPR:$X80Src": {
+      "FPR = F80COS FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR:$Sin, FPR:$Cos = F80SINCOS FPR:$X80Src": {
+      "FPR:$Sin, FPR:$Cos = F80SINCOS FPR:$X80Src, i1:$ClearAFP, i1:$RestoreAFP": {
         "DestSize": "OpSize::i128Bit",
         "HasSideEffects": true,
         "JITDispatch": false
@@ -3288,15 +3288,15 @@
         "X87": true,
         "HasSideEffects": true
       },
-      "FPR = F80SQRT FPR:$X80Src": {
+      "FPR = F80SQRT FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80XTRACT_EXP FPR:$X80Src": {
+      "FPR = F80XTRACT_EXP FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80XTRACT_SIG FPR:$X80Src": {
+      "FPR = F80XTRACT_SIG FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3324,18 +3324,18 @@
         "HasSideEffects": true,
         "X87": true
       },
-      "GPR = F80Cmp FPR:$X80Src1, FPR:$X80Src2": {
+      "GPR = F80Cmp FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "Desc": ["Does a scalar unordered compare and stores the flags in to a GPR",
                  "Ordering flag result is true if either float input is NaN"
                 ],
         "DestSize": "OpSize::i32Bit",
         "JITDispatch": false
       },
-      "FPR = F80BCDLoad FPR:$X80Src": {
+      "FPR = F80BCDLoad FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
-      "FPR = F80BCDStore FPR:$X80Src": {
+      "FPR = F80BCDStore FPR:$X80Src, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3349,7 +3349,7 @@
         "DestSize": "OpSize::i128Bit",
         "X87": true
       },
-      "FPR = F80FYL2X FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80FYL2X FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },
@@ -3363,7 +3363,7 @@
         "DestSize": "OpSize::i128Bit",
         "X87": true
       },
-      "FPR = F80FYL2XP1 FPR:$X80Src1, FPR:$X80Src2": {
+      "FPR = F80FYL2XP1 FPR:$X80Src1, FPR:$X80Src2, i1:$ClearAFP{true}, i1:$RestoreAFP{true}": {
         "DestSize": "OpSize::i128Bit",
         "JITDispatch": false
       },

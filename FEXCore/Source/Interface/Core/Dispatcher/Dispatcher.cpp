@@ -34,7 +34,7 @@ static void SleepThread(FEXCore::Context::ContextImpl* CTX, FEXCore::Core::CpuSt
   CTX->SyscallHandler->SleepThread(CTX, Frame);
 }
 
-constexpr size_t MAX_DISPATCHER_CODE_SIZE = FEXCore::Utils::FEX_PAGE_SIZE * 4;
+constexpr size_t MAX_DISPATCHER_CODE_SIZE = FEXCore::Utils::FEX_PAGE_SIZE * 12;
 
 Dispatcher::Dispatcher(FEXCore::Context::ContextImpl* ctx)
   : Arm64Emitter(ctx, FEXCore::Allocator::VirtualAlloc(MAX_DISPATCHER_CODE_SIZE, true), MAX_DISPATCHER_CODE_SIZE)
@@ -645,6 +645,13 @@ void Dispatcher::EmitDispatcher() {
 
     for (auto ABI : ABIS) {
       ABIPointers[ABI] = GenerateABICall(ABI);
+      for (size_t i = 0; i < ABIPointersAFP.size(); ++i) {
+        ClearAFPOnSpill = i & 1;
+        SetAFPOnFill = i & 2;
+        ABIPointersAFP[i][ABI] = GenerateABICall(ABI);
+      }
+      ClearAFPOnSpill = true;
+      SetAFPOnFill = true;
     }
   }
 
@@ -2703,6 +2710,9 @@ void Dispatcher::InitThreadPointers(FEXCore::Core::InternalThreadState* Thread) 
 
     // Fill in the fallback handlers
     InterpreterOps::FillFallbackIndexPointers(Ptrs.FallbackHandlerPointers, &ABIPointers[0]);
+    for (size_t i = 0; i < ABIPointersAFP.size(); ++i) {
+      InterpreterOps::FillFallbackIndexPointers(Ptrs.FallbackHandlerAFPPointers[i], &ABIPointersAFP[i][0]);
+    }
   }
 }
 

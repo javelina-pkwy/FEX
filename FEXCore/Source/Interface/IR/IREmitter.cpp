@@ -35,6 +35,41 @@ bool IsBlockExit(FEXCore::IR::IROps Op) {
   }
 }
 
+std::pair<bool*, bool*> GetFallbackAFPFlags(IROp_Header* Op) {
+#define AFP_FLAGS(Type) \
+  case Type::OPCODE: return {&Op->CW<Type>()->ClearAFP, &Op->CW<Type>()->RestoreAFP}
+  switch (Op->Op) {
+    AFP_FLAGS(IROp_F80Add);
+    AFP_FLAGS(IROp_F80Sub);
+    AFP_FLAGS(IROp_F80Mul);
+    AFP_FLAGS(IROp_F80Div);
+    AFP_FLAGS(IROp_F80ATAN);
+    AFP_FLAGS(IROp_F80FPREM);
+    AFP_FLAGS(IROp_F80FPREM1);
+    AFP_FLAGS(IROp_F80SCALE);
+    AFP_FLAGS(IROp_F80FYL2X);
+    AFP_FLAGS(IROp_F80FYL2XP1);
+    AFP_FLAGS(IROp_F80CVT);
+    AFP_FLAGS(IROp_F80CVTInt);
+    AFP_FLAGS(IROp_F80CVTTo);
+    AFP_FLAGS(IROp_F80CVTToInt);
+    AFP_FLAGS(IROp_F80Round);
+    AFP_FLAGS(IROp_F80F2XM1);
+    AFP_FLAGS(IROp_F80TAN);
+    AFP_FLAGS(IROp_F80SIN);
+    AFP_FLAGS(IROp_F80COS);
+    AFP_FLAGS(IROp_F80SINCOS);
+    AFP_FLAGS(IROp_F80SQRT);
+    AFP_FLAGS(IROp_F80XTRACT_EXP);
+    AFP_FLAGS(IROp_F80XTRACT_SIG);
+    AFP_FLAGS(IROp_F80Cmp);
+    AFP_FLAGS(IROp_F80BCDLoad);
+    AFP_FLAGS(IROp_F80BCDStore);
+  default: return {};
+  }
+#undef AFP_FLAGS
+}
+
 RegClass IREmitter::WalkFindRegClass(Ref Node) const {
   auto Class = GetOpRegClass(Node);
   switch (Class) {

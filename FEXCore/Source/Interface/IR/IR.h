@@ -675,6 +675,10 @@ inline NodeID NodeWrapperBase<Type>::ID() const {
 [[nodiscard]]
 bool IsBlockExit(FEXCore::IR::IROps Op);
 
+// Returns the ClearAFP and RestoreAFP flags of an x87 fallback op, or nullptrs for any other op.
+[[nodiscard]]
+std::pair<bool*, bool*> GetFallbackAFPFlags(IROp_Header* Op);
+
 void Dump(fextl::ostringstream* out, const IRListView* IR);
 
 constexpr auto format_as(FEXCore::IR::NodeID ID) {

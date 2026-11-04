@@ -722,6 +722,47 @@ Ref X87StackOptimization::SynchronizeStackValues() {
   return TopValue;
 }
 
+// Ops that only use integer, load and store instructions, so they don't depend on the FPCR AFP bits.
+static bool IsAFPInsensitiveOp(IROps Op) {
+  switch (Op) {
+  case OP_GUESTOPCODE:
+  case OP_INLINECONSTANT:
+  case OP_CONSTANT:
+  case OP_ENTRYPOINTOFFSET:
+  case OP_INLINEENTRYPOINTOFFSET:
+  case OP_LOADCONTEXT:
+  case OP_STORECONTEXT:
+  case OP_LOADREGISTER:
+  case OP_STOREREGISTER:
+  case OP_RMWHANDLE:
+  case OP_ADD:
+  case OP_ADDSHIFT:
+  case OP_ADDWITHFLAGS:
+  case OP_SUB:
+  case OP_SUBWITHFLAGS:
+  case OP_SUBNZCV:
+  case OP_XOR:
+  case OP_NOT:
+  case OP_LSHL:
+  case OP_LSHR:
+  case OP_BFE:
+  case OP_SBFE:
+  case OP_STOREAF:
+  case OP_STOREPF:
+  case OP_NZCVSELECT:
+  case OP_RMIFNZCV:
+  case OP_LOADMEM:
+  case OP_STOREMEM:
+  case OP_LOADMEMTSO:
+  case OP_STOREMEMTSO:
+  case OP_PUSH:
+  case OP_LOADNAMEDVECTORCONSTANT:
+  case OP_LOADMEMX87SVEOPTPREDICATE:
+  case OP_STOREMEMX87SVEOPTPREDICATE: return true;
+  default: return false;
+  }
+}
+
 void X87StackOptimization::Run(IREmitter* Emit) {
   FEXCORE_PROFILE_SCOPED("PassManager::x87StackOpt");
 
@@ -736,6 +777,8 @@ void X87StackOptimization::Run(IREmitter* Emit) {
 
   // Initialize IREmit member
   IREmit = Emit;
+  // Nodes from here on are emitted by this pass.
+  const auto OriginalSSACount = CurrentIR.GetSSACount();
 
   // Run optimization proper
   for (auto [BlockNode, BlockHeader] : CurrentIR.GetBlocks()) {
@@ -745,8 +788,22 @@ void X87StackOptimization::Run(IREmitter* Emit) {
     Reset();
 
     IREmit->SetCurrentCodeBlock(BlockNode);
+    // Full precision x87 operations are fallback calls, which clear and set the FPCR AFP bits.
+    // Consecutive calls skip the set and clear between them when only AFP insensitive ops are between them.
+    bool* PreviousRestoreAFP {};
     for (auto [CodeNode, IROp] : CurrentIR.GetCode(BlockNode)) {
       if (!LoweredX87(IROp->Op)) {
+        if (!ReducedPrecisionMode && Features.SupportsAFP) {
+          if (const auto [ClearAFP, RestoreAFP] = GetFallbackAFPFlags(IROp); ClearAFP) {
+            if (PreviousRestoreAFP) {
+              *PreviousRestoreAFP = false;
+              *ClearAFP = false;
+            }
+            PreviousRestoreAFP = RestoreAFP;
+          } else if (!IsAFPInsensitiveOp(IROp->Op) && CurrentIR.GetID(CodeNode).Value < OriginalSSACount) {
+            PreviousRestoreAFP = nullptr;
+          }
+        }
         continue;
       }
       IREmit->SetWriteCursor(CodeNode);
@@ -892,7 +949,7 @@ void X87StackOptimization::Run(IREmitter* Emit) {
         else {
           SinValue = IREmit->_AllocateFPR(OpSize::i128Bit, OpSize::i128Bit);
           CosValue = IREmit->_AllocateFPR(OpSize::i128Bit, OpSize::i128Bit);
-          IREmit->_F80SINCOS(St0, SinValue, CosValue);
+          IREmit->_F80SINCOS(St0, true, true, SinValue, CosValue);
         }
 
         // Push values
