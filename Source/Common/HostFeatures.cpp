@@ -364,6 +364,7 @@ static void OverrideFeatures(FEXCore::HostFeatures* Features, uint64_t ForceSVEW
   ENABLE_DISABLE_OPTION(SupportsCSSC, CSSC, CSSC);
   ENABLE_DISABLE_OPTION(SupportsPMULL_128Bit, PMULL128, PMULL128);
   ENABLE_DISABLE_OPTION(SupportsRAND, RNG, RNG);
+  ENABLE_DISABLE_OPTION(SupportsRDSEED, RDSEED, RNG);
   ENABLE_DISABLE_OPTION(SupportsCLZERO, CLZERO, CLZERO);
   ENABLE_DISABLE_OPTION(SupportsAtomics, Atomics, ATOMICS);
   ENABLE_DISABLE_OPTION(SupportsFCMA, FCMA, FCMA);
@@ -440,8 +441,8 @@ static void HandleErrata(FEXCore::HostFeatures* HostFeatures, uint64_t MIDR) {
     // - The RNDRRS register will never read a random number. (Always return failure)
     // This is contrary to x86 RNG behaviour where it allows spurious failure with RDSEED, but guarantees eventual success.
     // This manifested itself on Linux when an x86 processor failed to guarantee forward progress and boot of services would infinite
-    // loop. Just disable this extension if this CPU is detected.
-    HostFeatures->SupportsRAND = false;
+    // loop. Just disable RNDRRS if this CPU is detected. RDRAND still uses RNDR.
+    HostFeatures->SupportsRDSEED = false;
   }
 #endif
 
@@ -496,6 +497,7 @@ void FetchHostFeatures(FEX::CPUFeatures& Features, FEXCore::HostFeatures& HostFe
   HostFeatures.SupportsSHA = Features.Supports(CPUFeatures::Feature::SHA1) && Features.Supports(CPUFeatures::Feature::SHA2);
   HostFeatures.SupportsAtomics = Features.Supports(CPUFeatures::Feature::LSE);
   HostFeatures.SupportsRAND = Features.Supports(CPUFeatures::Feature::RNDR);
+  HostFeatures.SupportsRDSEED = Features.Supports(CPUFeatures::Feature::RNDR);
 
   // Only supported when FEAT_AFP is supported
   HostFeatures.SupportsAFP = Features.Supports(CPUFeatures::Feature::AFP);
@@ -589,6 +591,7 @@ void FetchHostFeatures(FEX::CPUFeatures& Features, FEXCore::HostFeatures& HostFe
   HostFeatures.SupportsAES = Feature.Feat_aes;
   HostFeatures.SupportsCRC = Feature.Feat_crc;
   HostFeatures.SupportsRAND = Feature.Feat_rand;
+  HostFeatures.SupportsRDSEED = Feature.Feat_rand;
   HostFeatures.SupportsRCPC = true;
   HostFeatures.SupportsTSOImm9 = true;
   HostFeatures.SupportsAVXInst = Feature.Feat_avx;

@@ -299,7 +299,8 @@ DEF_OP(ProcessorID) {
 DEF_OP(RDRAND) {
   auto Op = IROp->C<IR::IROp_RDRAND>();
 
-  if (CTX->HostFeatures.SupportsRAND) {
+  const bool HostSupportsRAND = Op->GetReseeded ? CTX->HostFeatures.SupportsRDSEED : CTX->HostFeatures.SupportsRAND;
+  if (HostSupportsRAND) {
     mrs(GetReg(Node), Op->GetReseeded ? ARMEmitter::SystemRegister::RNDRRS : ARMEmitter::SystemRegister::RNDR);
     return;
   }

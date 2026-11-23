@@ -700,7 +700,7 @@ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_07h(uint32_t Leaf) const {
     const uint32_t SupportsVPCLMULQDQ = CTX->HostFeatures.SupportsPMULL_128Bit && SupportsAVX();
     const uint32_t SupportsWFXT = CTX->HostFeatures.SupportsWFXT;
 
-    const uint32_t SupportsRAND = CTX->HostFeatures.SupportsRAND || CTX->SoftwareRNGEnabled();
+    const uint32_t SupportsRDSEED = CTX->HostFeatures.SupportsRDSEED || CTX->SoftwareRNGEnabled();
     // When the X87 FIP feature is enabled, we update the state pointers on every instruction.
     // We don't even update them on exception so this isn't quite true the other way anyway.
     const uint32_t X87DataPtrExcept = (CTX->Config.JITFeatures & FEXCore::Config::JITFeatures::ENABLEX87FIP) == 0;
@@ -727,7 +727,7 @@ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_07h(uint32_t Leaf) const {
               (0 << 15) |                      // Intel Resource Directory Technology Allocation
               (0 << 16) |                      // AVX512-F
               (0 << 17) |                      // AVX512-DQ
-              (SupportsRAND << 18) |           // RDSEED
+              (SupportsRDSEED << 18) |         // RDSEED
               (1 << 19) |                      // ADCX and ADOX instructions
               (0 << 20) |                      // SMAP Supervisor mode access prevention and CLAC/STAC instructions
               (0 << 21) |                      // AVX512-IFMA

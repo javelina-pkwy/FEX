@@ -211,6 +211,7 @@ int main(int argc, char** argv, char** const envp) {
                          (!HostFeatures.SupportsSHA && Loader.RequiresSHA()) || (!HostFeatures.SupportsCLZERO && Loader.RequiresCLZERO()) ||
                          (!HostFeatures.SupportsAES256 && Loader.RequiresAES256()) || (!HostFeatures.SupportsAFP && Loader.RequiresAFP());
   TestUnsupported |= !HostFeatures.SupportsBF16 && Loader.RequiresAVXNEConvert();
+  TestUnsupported |= !HostFeatures.SupportsRDSEED && Loader.RequiresRAND();
 
   bool IsHostRunner = false;
 #if !defined(VIXL_SIMULATOR) && defined(ARCHITECTURE_x86_64)
